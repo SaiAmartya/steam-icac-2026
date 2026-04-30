@@ -1,0 +1,28 @@
+# Core
+numpy>=1.26
+opencv-python>=4.9
+opencv-contrib-python>=4.9          # for cv2.saliency (spectral residual, fine-grained)
+scikit-image>=0.22                   # PSNR / SSIM / MS-SSIM
+scipy>=1.11
+
+# Neural codec + saliency model
+torch>=2.1
+torchvision>=0.16
+
+# Perceptual metric (optional but recommended)
+lpips>=0.1.4
+
+# Useful-footage gate: person detection (optional)
+ultralytics>=8.1                     # YOLOv8n
+
+# Audio event detection (optional; heavy deps, guarded in code)
+# tensorflow>=2.15                    # uncomment when wiring YAMNet in Day 3
+
+# Video IO
+ffmpeg-python>=0.2                   # optional CLI wrapper; ffmpeg CLI is the main dep
+
+# UX
+tqdm>=4.66
+
+# Dev
+pytest>=8.0
