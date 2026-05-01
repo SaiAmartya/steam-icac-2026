@@ -37,14 +37,26 @@ The whole thing runs on a laptop with a built-in webcam — no special hardware 
 
 ---
 
-## Quick start (macOS)
+## Quick start
 
 ```bash
-git clone <this repo url>
-cd "STEAM IC"
+git clone https://github.com/SaiAmartya/steam-icac-2026.git
+cd "steam-icac-2026"
+```
+
+Option 1: Use setup.sh file (macOS only)
+```bash 
 chmod +x setup.sh
 ./setup.sh                          # installs ffmpeg via Homebrew + creates .venv + pip install
 source .venv/bin/activate
+```
+
+Alternative: Use `just setup` (cross platform)
+
+```bash
+just setup
+```
+You need to install [just](https://github.com/casey/just) for this to work
 
 # 1) Generate a 10-second synthetic surveillance clip
 python scripts/make_test_video.py
