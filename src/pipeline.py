@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class PipelineConfig:
-    gate_threshold: float = 0.35
+    gate_threshold: float = 0.25
     gate_enable_person: bool = False
     saliency_backend: str = "spectral"
     smooth_window: int = 5
@@ -39,6 +39,11 @@ class PipelineConfig:
     blur_strength: int = 21
     idle_blur_strength: int = 51      # harsher blur when gate is not triggered
     baseline_crf: int = 28             # baseline for comparison
+    # Saliency mask shaping — sigmoid is the empirically-validated default
+    # (mask-mode ablation 2026-04-30: +6.6 dB sal-PSNR vs the legacy 'alpha').
+    mask_mode: str = "sigmoid"
+    mask_threshold: float = 0.4
+    mask_steepness: float = 12.0
 
 
 def run_pipeline(
@@ -71,6 +76,9 @@ def run_pipeline(
             codec=cfg.codec,
             crf=cfg.crf,
             blur_strength=cfg.blur_strength,
+            mask_mode=cfg.mask_mode,
+            mask_threshold=cfg.mask_threshold,
+            mask_steepness=cfg.mask_steepness,
         )
     )
     idle_compressor = SaliencyCompressor(
@@ -79,6 +87,9 @@ def run_pipeline(
             codec=cfg.codec,
             crf=cfg.crf,
             blur_strength=cfg.idle_blur_strength,
+            mask_mode=cfg.mask_mode,
+            mask_threshold=cfg.mask_threshold,
+            mask_steepness=cfg.mask_steepness,
         )
     )
 
