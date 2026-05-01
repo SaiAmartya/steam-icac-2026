@@ -1,0 +1,13 @@
+{
+  "device": "mps",
+  "encode_ms_median": 1.427958020940423,
+  "decode_ms_median": 1.347729004919529,
+  "bytes_per_frame": 32768,
+  "compression_ratio_vs_raw_BGR_256x256": 6.0,
+  "reconstruction_psnr_mean": 28.94951116815496,
+  "weights_size_bytes": 317940,
+  "param_count": 76131,
+  "training_final_loss": 0.0023050949601456524,
+  "n_training_frames": 1997,
+  "epochs": 30
+}

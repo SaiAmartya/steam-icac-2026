@@ -1,0 +1,37 @@
+{
+  "ours_b9_crf28": {
+    "clips_evaluated": 20,
+    "mean_file_size_kb": 87.459375,
+    "mean_psnr": 26.912630694447632,
+    "mean_sal_psnr": 25.066679967853904,
+    "mean_trigger_ratio": 0.6524060846560846
+  },
+  "ours_b21_crf28": {
+    "clips_evaluated": 40,
+    "mean_file_size_kb": 70.948388671875,
+    "mean_psnr": 23.762547094273895,
+    "mean_sal_psnr": 22.082968447511732,
+    "mean_trigger_ratio": 0.6524060846560846
+  },
+  "ours_b41_crf28": {
+    "clips_evaluated": 20,
+    "mean_file_size_kb": 61.853173828125,
+    "mean_psnr": 21.8085438686092,
+    "mean_sal_psnr": 20.400093161465044,
+    "mean_trigger_ratio": 0.6524060846560846
+  },
+  "ours_b21_crf22": {
+    "clips_evaluated": 20,
+    "mean_file_size_kb": 123.650732421875,
+    "mean_psnr": 23.93787050659059,
+    "mean_sal_psnr": 22.399874559121955,
+    "mean_trigger_ratio": 0.6524060846560846
+  },
+  "ours_b21_crf34": {
+    "clips_evaluated": 20,
+    "mean_file_size_kb": 44.90224609375,
+    "mean_psnr": 23.242166432796598,
+    "mean_sal_psnr": 21.21619454432841,
+    "mean_trigger_ratio": 0.6524060846560846
+  }
+}
