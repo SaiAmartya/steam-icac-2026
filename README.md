@@ -59,12 +59,18 @@ just setup
 You need to install [just](https://github.com/casey/just) for this to work
 
 # 1) Generate a 10-second synthetic surveillance clip
+```bash
 python scripts/make_test_video.py
+```
 
 # 2) Run the full pipeline
+```bash
 python scripts/run_pipeline.py --input data/test.mp4 --out results --verbose
+```
 
 # 3) Live webcam demo (saliency overlay + gate HUD)
+
+```bash
 python scripts/live_demo.py
 ```
 
