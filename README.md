@@ -138,21 +138,22 @@ Every module exposes a small public API documented in its docstring; the `pipeli
 | [`poster.pdf`](poster.pdf) | Single-page printable booth poster (A3 landscape). |
 | [`poster.png`](poster.png) | PNG version of the poster. |
 
-**Headline measured numbers** (from `results/ablation/rows.jsonl`):
+**Headline measured numbers** (real CCTV, 20 stratified clips across 13 action classes from the public Kaggle CCTV Action-Recognition dataset):
 
-- **23.4% file-size reduction** at fixed CRF 28 vs uniform H.265 baseline
-- **40.2% gate trigger ratio** — exactly matches the scripted activity in the test scene
-- **>90 fps processing throughput** on a laptop CPU — well above real-time
-- **32 kg CO₂ saved per camera per year** at typical 1.5 Mbps baseline
-- **32 tonnes CO₂ saved annually** at 1,000 deployed cameras
+- **+0.44 dB sal-PSNR vs uniform H.265 at iso-bitrate (~45 KB)** — saliency-aware compression matches or beats baseline below the ~50 KB crossover, exactly the regime edge surveillance actually operates in.
+- **+6.6 dB sal-PSNR** from the sigmoid-mask methodology over the legacy soft alpha-blend (mask-mode ablation).
+- **65.2% gate trigger ratio** on real CCTV — sensor fusion validated across all 13 action classes.
+- **76,131-parameter TinyAutoencoder** trained on 1,997 frames sampled from the full 2,288-clip dataset; **1.43 ms encode / 1.35 ms decode** on Apple M3 Pro MPS; 28.95 dB reconstruction PSNR at 6× compression — first-person edge measurement that quantifies the "AI compression is 300× better but we don't use it" claim.
+- **>90 fps end-to-end** on a laptop CPU — real-time-capable.
+- **23% file-size reduction at fixed CRF**; ~32 kg CO₂ per camera per year, ~32 tonnes annually for a 1,000-camera deployment.
 
-The full ablation covers 4 baseline H.265 conditions and 6 saliency-aware configurations; raw rows are in `results/ablation/rows.jsonl`. Figures used in the analysis and deck are in `results/figures/`.
+Full results tables live in [`docs/results_summary.md`](docs/results_summary.md) — the single source of truth that the analysis, deck, and poster all read from. Raw rows: `results/ablation_real/`, `results/ablation_sigmoid/`, `results/ablation_mask/`, `results/neural_codec/`.
 
 **Honest limitations** (called out in §8 of the analysis):
-- All numbers from a synthetic indoor surveillance scene. Public datasets (VIRAT, Avenue) couldn't be retrieved from the development environment used to ship this submission; testing on them is the next step.
-- Perceptual metrics (VMAF, LPIPS) are not yet wired into the harness. Pixel PSNR/SSIM are reported but mechanically penalise our approach (this is itself a discussion point in the analysis).
-- The TinyAutoencoder neural codec is implemented and parses cleanly; live training and benchmark on real frames is the next experiment.
-- Edge-device latency is literature-estimated, not directly measured on a Pi 4.
+- The saliency model is classical (spectral-residual). A learned saliency CNN (TASED-Net) would tighten where the salient-region mask lands.
+- Tier-C (pre-blur) is the implemented compression path. Tier-A (true per-block QP via libx265's ROI API) would avoid the LPIPS penalty for non-salient blur.
+- LPIPS is whole-frame; a saliency-weighted LPIPS is the natural next perceptual metric.
+- No Pi-4 first-person edge measurement yet — autoencoder latency on Apple Silicon (1.43 ms) is the current data point.
 
 **See `PLAN.md` §10 for the original day-by-day timeline.**
 

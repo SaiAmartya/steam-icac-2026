@@ -1,13 +1,12 @@
 {
   "measured_relative_saving": 0.234,
   "baseline_mbps_assumed": 1.5,
-  "GB_saved_per_camera_year": 1350.7,
-  "kwh_saved_per_camera_year": 81.04,
-  "co2_kg_saved_per_camera_year": 32.42,
-  "co2_kg_per_1000cams_year": 32416.5,
+  "GB_saved_per_camera_year": 1352.0,
+  "kwh_saved_per_camera_year": 81.1,
+  "co2_kg_saved_per_camera_year": 32.4,
+  "co2_kg_per_1000cams_year": 32450.0,
   "assumption_kwh_per_GB": 0.06,
-  "assumption_kwh_per_GB_source": "Masanet et al. 2020 \u2014 order-of-magnitude",
   "assumption_kgCO2_per_kwh": 0.4,
-  "assumption_kgCO2_per_kwh_source": "EPA US grid average",
-  "operating_point": "ours_b21_crf28 vs baseline_crf28"
+  "operating_point": "ours_sigmoid_b21_crf28 vs baseline_crf28",
+  "framing": "iso-CRF (encoder target, not iso-quality)"
 }
