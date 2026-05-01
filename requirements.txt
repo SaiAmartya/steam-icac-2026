@@ -21,6 +21,9 @@ ultralytics>=8.1                     # YOLOv8n
 # Video IO
 ffmpeg-python>=0.2                   # optional CLI wrapper; ffmpeg CLI is the main dep
 
+# Plots and figures
+matplotlib>=3.8
+
 # UX
 tqdm>=4.66
 

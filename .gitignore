@@ -1,9 +1,30 @@
 .venv/
 __pycache__/
 *.pyc
-data/
-results/
 *.pt
 *.pth
 .DS_Store
 .ipynb_checkpoints/
+
+# Build artefact for the docx (created by `npm install` in scripts/)
+scripts/node_modules
+node_modules
+
+# Local raw data and run artefacts (regeneratable)
+data/
+
+# Most of results/ is regeneratable; we DO commit results/figures/ so the
+# analysis renders without rerunning the pipeline.
+results/ablation/*.mp4
+results/main_run/
+results/baseline_uniform.mp4
+results/ours_saliency.mp4
+results/events.json
+results/metrics.json
+
+# Stragglers from the build process
+.~lock.*#
+*.tmp
+slide-*.jpg
+analysis_pg-*.jpg
+

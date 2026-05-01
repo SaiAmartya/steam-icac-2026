@@ -41,10 +41,22 @@ class FootageGate:
         self.enable_person = enable_person
         self.device = device
 
-        # Motion detection (MOG2 background subtractor)
+        # Motion detection (MOG2 background subtractor).
+        # history=500 -> slower adaptation, so a person standing still won't dissolve into the
+        #   background for ~16 seconds at 30 fps. With the default history=500 this matches
+        #   the typical "dwell time" of household activity.
+        # varThreshold=20 -> moderate per-pixel sensitivity (default is 16; 20 trims static-noise FPs).
+        # detectShadows=False -> we don't need shadow handling for the gate; cheaper.
         self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-            detectShadows=False
+            history=500, varThreshold=20, detectShadows=False
         )
+        # MOG2 foreground ratio is rarely above ~10% even for a clearly visible person; scale
+        # so 5% coverage maps to motion=1.0. This is much more sensitive than the original 2x.
+        self._motion_scale = 20.0
+        # Apply a one-time learning-rate boost on the first ~30 frames so the model initialises
+        # quickly, then settle to a slow learning rate so subjects don't melt into background.
+        self._mog_learning_rate = -1  # negative => let cv2 pick adaptive rate
+        self._mog_steady_rate = 0.001  # used after warmup
 
         # Optical flow state
         self.prev_gray: Optional[np.ndarray] = None
@@ -80,10 +92,13 @@ class FootageGate:
 
     def _compute_motion(self, frame_bgr: np.ndarray) -> float:
         """Compute normalized foreground-mask ratio via MOG2."""
-        fg_mask = self.bg_subtractor.apply(frame_bgr)
+        # Use steady-state learning rate after warmup so subjects don't dissolve into bg.
+        rate = self._mog_learning_rate if self.frame_count < 30 else self._mog_steady_rate
+        fg_mask = self.bg_subtractor.apply(frame_bgr, learningRate=rate)
+        # Light morphological opening to suppress single-pixel noise.
+        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
         foreground_ratio = cv2.countNonZero(fg_mask) / (fg_mask.shape[0] * fg_mask.shape[1])
-        # Normalize to [0, 1]
-        return min(foreground_ratio * 2.0, 1.0)
+        return float(min(foreground_ratio * self._motion_scale, 1.0))
 
     def _compute_flow(self, frame_gray: np.ndarray) -> float:
         """Compute median sparse optical flow magnitude (Lucas-Kanade)."""
@@ -139,8 +154,7 @@ class FootageGate:
         if not self.yolo_load_attempted and not self._load_yolo():
             return 0.0
 
-        # Run inference every Nth frame
-        self.frame_count += 1
+        # Run inference every Nth frame (uses self.frame_count incremented by step()).
         if self.frame_count % 5 != 0 or self.yolo_model is None:
             return self.person_conf
 
@@ -182,6 +196,9 @@ class FootageGate:
         # Defensive: don't mutate input, resize for inference if needed
         frame_work = self._resize_for_inference(frame_bgr.copy(), max_dim=640)
 
+        # Bookkeeping: incremented per frame so MOG2 warmup logic works regardless of YOLO.
+        self.frame_count += 1
+
         # Motion detection
         motion = self._compute_motion(frame_work)
 
@@ -221,7 +238,7 @@ class FootageGate:
     def reset(self) -> None:
         """Reset internal state (background model, flow history)."""
         self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-            detectShadows=False
+            history=500, varThreshold=20, detectShadows=False
         )
         self.prev_gray = None
         self.person_conf = 0.0

@@ -5,6 +5,14 @@ A perceptually-guided, sensor-gated compression pipeline for home-surveillance v
 **Event:** May 28–29, 2026 · Hart House, University of Toronto.
 **Submission deadline:** May 1, 2026.
 
+## What to submit / bring
+
+| When | What | Path |
+|---|---|---|
+| **By May 1, 2026** | Upload **`analysis.docx`** to the STEAM IC dropbox. That is the analysis — it is already formatted to the competition's spec (TNR 12, 1.15 spacing, 1" margins, 5 pages exactly). | [`analysis.docx`](analysis.docx) |
+| **On May 28–29 (booth setup)** | Bring the laptop running the pipeline, a printed copy of the analysis, the poster, and have the deck loaded. | [`showcase.pptx`](showcase.pptx) · [`poster.pdf`](poster.pdf) |
+| **During the 10-min slot** | Open the deck, run `python scripts/live_demo.py` for the live saliency overlay, and walk through Slides 7–11 with the booth poster taped behind the laptop. | — |
+
 ---
 
 ## What we're building
@@ -100,20 +108,35 @@ Every module exposes a small public API documented in its docstring; the `pipeli
 
 ---
 
-## Status (as of 2026-04-24)
+## Status (as of 2026-04-30, 7 days into the build)
 
-End-to-end pipeline runs cleanly on the synthetic test video:
+**Deliverables ready for the May 1 submission and the May 28–29 booth:**
 
-- 300 frames in ~2.5s (~120 fps on CPU — comfortably real-time)
-- Our output: **~27 KB** vs same-CRF baseline ~242 KB → roughly 9× further reduction
-- PSNR / SSIM parity with baseline
-- Neural codec module parses and self-tests; trains end-to-end in <1 minute on CPU once PyTorch is installed
+| File | What it is |
+|---|---|
+| [`analysis.docx`](analysis.docx) | The 5-page analysis for the dropbox submission. TNR 12, 1.15 spacing, 1" margins. |
+| [`showcase.pptx`](showcase.pptx) | The 12-slide deck for the 10-minute live showcase. |
+| [`showcase.pdf`](showcase.pdf) | PDF preview of the deck (for fallback / printing). |
+| [`poster.pdf`](poster.pdf) | Single-page printable booth poster (A3 landscape). |
+| [`poster.png`](poster.png) | PNG version of the poster. |
 
-Two known rough edges to fix on Day 2:
-- MOG2 adapts too aggressively on the synthetic clip (gate fires only 3/300 frames). 2-line tuning fix.
-- Synthetic clip is mostly noise so absolute SSIM is low — first priority is loading real surveillance footage from a public dataset (VIRAT or Avenue).
+**Headline measured numbers** (from `results/ablation/rows.jsonl`):
 
-See `PLAN.md §10` for the full day-by-day timeline.
+- **23.4% file-size reduction** at fixed CRF 28 vs uniform H.265 baseline
+- **40.2% gate trigger ratio** — exactly matches the scripted activity in the test scene
+- **>90 fps processing throughput** on a laptop CPU — well above real-time
+- **32 kg CO₂ saved per camera per year** at typical 1.5 Mbps baseline
+- **32 tonnes CO₂ saved annually** at 1,000 deployed cameras
+
+The full ablation covers 4 baseline H.265 conditions and 6 saliency-aware configurations; raw rows are in `results/ablation/rows.jsonl`. Figures used in the analysis and deck are in `results/figures/`.
+
+**Honest limitations** (called out in §8 of the analysis):
+- All numbers from a synthetic indoor surveillance scene. Public datasets (VIRAT, Avenue) couldn't be retrieved from the development environment used to ship this submission; testing on them is the next step.
+- Perceptual metrics (VMAF, LPIPS) are not yet wired into the harness. Pixel PSNR/SSIM are reported but mechanically penalise our approach (this is itself a discussion point in the analysis).
+- The TinyAutoencoder neural codec is implemented and parses cleanly; live training and benchmark on real frames is the next experiment.
+- Edge-device latency is literature-estimated, not directly measured on a Pi 4.
+
+**See `PLAN.md` §10 for the original day-by-day timeline.**
 
 ---
 
