@@ -58,14 +58,22 @@ just setup
 ```
 You need to install [just](https://github.com/casey/just) for this to work
 
-# 1) Generate a 10-second synthetic surveillance clip
+# 1a) Pull hundreds of real CCTV clips (stratified across 13 UCF-Crime classes)
+```bash
+python scripts/acquire_real_cctv.py --n-clips 400          # ~3 min, ~180 MB
+# Output: data/real/clip_NNN.mp4 + data/real/manifest.json
+```
+
+The acquisition streams the public UCF-Crime mirror on Hugging Face straight through ffmpeg and writes 640×360 @ 30 fps libx264 CRF 18 clips — the same format the rest of the pipeline expects. Use `--n-clips 950` to pull the full benchmark, `--max-duration 30` for longer clips, `--clean` to start over.
+
+# 1b) Or generate a 10-second synthetic clip (no network needed)
 ```bash
 python scripts/make_test_video.py
 ```
 
 # 2) Run the full pipeline
 ```bash
-python scripts/run_pipeline.py --input data/test.mp4 --out results --verbose
+python scripts/run_pipeline.py --input data/real/clip_001.mp4 --out results --verbose
 ```
 
 # 3) Live webcam demo (saliency overlay + gate HUD)
@@ -165,7 +173,6 @@ If you've just landed on the project and want to pick something up, here are the
 
 | Stream | Skill needed | Effort | What it unblocks |
 |---|---|---|---|
-| Real footage acquisition | none — just downloading and labelling | half a day | Replaces synthetic clip; unblocks all real numbers in the analysis. VIRAT or CMU Avenue dataset. |
 | Gate tuning on real footage | OpenCV familiarity | half a day | Right MOG2 / flow thresholds + small hand-labelled set for fusion-weight learning. |
 | Compression Tier B upgrade | ffmpeg + Python | 1 day | Per-frame average-QP via `--qp-file`, replacing the Tier C blur fallback. |
 | Neural codec training | PyTorch | 1 day | Real numbers for the side-by-side comparison: encode/decode latency, PSNR vs file size on a few hundred real frames. |
