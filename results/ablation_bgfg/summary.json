@@ -1,0 +1,58 @@
+{
+  "per_config": [
+    {
+      "config": "baseline_h265",
+      "crf": 22,
+      "n_clips": 20,
+      "bytes_mean_KB": 256.388720703125,
+      "psnr_mean": 41.306042521157444,
+      "ssim_mean": 0.9825994895963615,
+      "sal_psnr_mean": 39.706857998384564
+    },
+    {
+      "config": "baseline_h265",
+      "crf": 28,
+      "n_clips": 20,
+      "bytes_mean_KB": 134.1515625,
+      "psnr_mean": 37.69381995829094,
+      "ssim_mean": 0.9698391002476487,
+      "sal_psnr_mean": 35.99955326990029
+    },
+    {
+      "config": "baseline_h265",
+      "crf": 34,
+      "n_clips": 20,
+      "bytes_mean_KB": 73.48984375,
+      "psnr_mean": 34.13096282195019,
+      "ssim_mean": 0.9461651355755853,
+      "sal_psnr_mean": 32.371378852773304
+    },
+    {
+      "config": "ours_bgfg",
+      "crf": 22,
+      "n_clips": 20,
+      "bytes_mean_KB": 213.449951171875,
+      "psnr_mean": 35.50308180515961,
+      "ssim_mean": 0.9716219702991431,
+      "sal_psnr_mean": 35.59168748606157
+    },
+    {
+      "config": "ours_bgfg",
+      "crf": 28,
+      "n_clips": 20,
+      "bytes_mean_KB": 118.3740234375,
+      "psnr_mean": 34.21083307065555,
+      "ssim_mean": 0.9612969421467872,
+      "sal_psnr_mean": 33.59614329162759
+    },
+    {
+      "config": "ours_bgfg",
+      "crf": 34,
+      "n_clips": 20,
+      "bytes_mean_KB": 68.261669921875,
+      "psnr_mean": 32.25340270605243,
+      "ssim_mean": 0.939656705866916,
+      "sal_psnr_mean": 31.089525797460993
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "input": "/Users/saiamartya/Documents/Claude/Projects/STEAM IC/data/external/virat_parking.mp4",
+  "resolution": [
+    1280,
+    720
+  ],
+  "fps": 23.97,
+  "duration_s": 24.36378806841886,
+  "n_frames": 584,
+  "saliency_backend": "yolo+spectral",
+  "raw_input_bytes": 5248590,
+  "per_crf": [
+    {
+      "crf": 22,
+      "baseline_bytes": 3225384,
+      "bgfg_bytes": 1716073,
+      "saved_pct": 46.79476924298006,
+      "baseline": {
+        "psnr_mean": 41.005931830319106,
+        "ssim_mean": 0.9714449848423704,
+        "sal_psnr_mean": 36.9955259275887,
+        "n_frames_evaluated": 39
+      },
+      "bgfg": {
+        "psnr_mean": 35.406528069888665,
+        "ssim_mean": 0.9547518768847075,
+        "sal_psnr_mean": 34.41817946767607,
+        "n_frames_evaluated": 39
+      },
+      "encode_baseline_s": 3.7793307304382324,
+      "encode_bgfg_s": 58.78739786148071
+    }
+  ]
+}
