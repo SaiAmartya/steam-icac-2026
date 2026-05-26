@@ -32,7 +32,8 @@ logger = logging.getLogger(__name__)
 class PipelineConfig:
     gate_threshold: float = 0.25
     gate_enable_person: bool = False
-    saliency_backend: str = "spectral"
+    saliency_backend: str = "spectral"   # "spectral" | "finegrained" | "yolo" | "yolo+spectral"
+    saliency_yolo_kwargs: Optional[dict] = None
     smooth_window: int = 5
     crf: int = 28
     codec: str = "libx265"
@@ -68,7 +69,10 @@ def run_pipeline(
 
     # Init subsystems
     gate = FootageGate(threshold=cfg.gate_threshold, enable_person=cfg.gate_enable_person)
-    saliency = SaliencyEstimator(backend=cfg.saliency_backend)
+    saliency = SaliencyEstimator(
+        backend=cfg.saliency_backend,
+        yolo_kwargs=cfg.saliency_yolo_kwargs,
+    )
     smoother = TemporalSmoother(window=cfg.smooth_window)
     compressor = SaliencyCompressor(
         CompressorConfig(
