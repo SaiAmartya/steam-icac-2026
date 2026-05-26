@@ -22,9 +22,36 @@ results/ours_saliency.mp4
 results/events.json
 results/metrics.json
 
+# Re-runnable result dirs — exclude the bulky outputs, keep small summaries
+results/ablation_bgfg/encoded/
+results/bench_external/*/source.mp4
+results/bench_external/*/baseline_crf*.mp4
+results/bench_external/*/ours_bgfg_crf*.mp4
+results/bench_external/*/comparison_crf*.mp4
+results/bench_external/*/ours_bgfg_crf*_bg.png
+results/comparisons/*.mp4
+results/photo_demo/
+results/saliency_videos/
+results/simulate_hour/
+results/ablation_real/clip_*/
+results/ablation_real/baselines/
+results/ablation_sigmoid/
+results/ablation_mask/
+results/ablation_quick/
+results/neural_codec/weights.pt
+
+# Big regenerated PDFs (>50MB) — recreate via scripts/qualitative_catalog_v2.py
+results/figures/qualitative_catalog.pdf
+results/figures/qualitative_catalog_v2.pdf
+
+# Working dirs for pptx/docx surgery
+.pptx_work/
+.docx_work/
+
 # Stragglers from the build process
 .~lock.*#
 *.tmp
 slide-*.jpg
 analysis_pg-*.jpg
-
+v2_slide-*.jpg
+docx_page-*.jpg

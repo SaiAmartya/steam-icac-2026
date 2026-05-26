@@ -1,39 +1,46 @@
 # STEAM ICAC 2026 — CS Showcase
 
-A perceptually-guided, sensor-gated compression pipeline for home-surveillance video. Our entry to the [STEAM Innovation Challenge Annual Conference 2026](https://steaminnovationchallenge.org/steam-icac-2026/), Computer Science prompt, Showcase format.
+A saliency-aware background/foreground codec for stationary surveillance cameras. Our entry to the [STEAM Innovation Challenge Annual Conference 2026](https://steaminnovationchallenge.org/steam-icac-2026/), Computer Science prompt, Showcase format.
 
 **Event:** May 28–29, 2026 · Hart House, University of Toronto.
-**Submission deadline:** May 1, 2026.
-
-## What to submit / bring
-
-| When | What | Path |
-|---|---|---|
-| **By May 1, 2026** | Upload **`analysis.docx`** to the STEAM IC dropbox. That is the analysis — it is already formatted to the competition's spec (TNR 12, 1.15 spacing, 1" margins, 5 pages exactly). | [`analysis.docx`](analysis.docx) |
-| **On May 28–29 (booth setup)** | Bring the laptop running the pipeline, a printed copy of the analysis, the poster, and have the deck loaded. | [`showcase.pptx`](showcase.pptx) · [`poster.pdf`](poster.pdf) |
-| **During the 10-min slot** | Open the deck, run `python scripts/live_demo.py` for the live saliency overlay, and walk through Slides 7–11 with the booth poster taped behind the laptop. | — |
 
 ---
 
-## What we're building
+## The one-line pitch
 
-Three subsystems answering the three sub-questions of the CS prompt:
+Surveillance cameras don't move. We exploit that explicitly: replace non-salient pixels with a learned background image, then hand the stream to H.265. The codec's inter-frame prediction collapses the static regions to near-zero bits, and every saved bit moves to the foreground.
 
-1. **Useful-footage gate** — multi-signal sensor fusion (motion + optical flow + on-device person detection + audio events) decides per frame whether something is "useful" enough to record at full fidelity.
-2. **Saliency-aware perceptual compression** — a saliency map drives where bits go; non-salient regions are aggressively compressed, salient regions stay crisp.
-3. **Neural-codec side-by-side** — a tiny conv autoencoder runs alongside the classical pipeline so we can directly answer the "AI compression is 300× better — why don't we use it?" question with our own numbers.
-
-The whole thing runs on a laptop with a built-in webcam — no special hardware needed for the showcase booth.
+The output is a standards-compliant H.265 mp4. Any decoder plays it back without modification.
 
 ---
 
-## For new teammates: where to start
+## What's in the deliverables
 
-1. **Read [`docs/00-overview.md`](docs/00-overview.md)** — 3-minute orientation: competition context, what we're building, deadlines, rubric.
-2. **Read [`PLAN.md`](PLAN.md)** — full project plan: architecture, scientific foundations, day-by-day timeline, rubric mapping, risks. ~25 minutes; this is the source of truth.
-3. **Skim [`docs/research/`](docs/research/)** — four research briefs (saliency compression, HVS principles, neural codecs, event detection) gathered during planning. Lean on these when writing the analysis.
-4. **Run the pipeline locally** — see "Quick start" below.
-5. **Open a thread on what to pick up** — see "Where the help is needed" further down.
+| File | What it is |
+|---|---|
+| [`analysis_v2.docx`](analysis_v2.docx) | The 5-page showcase analysis. Times New Roman 12, 1.15 spacing, 1" margins — STEAM IC spec exactly. |
+| [`STEAM_Project_v2.pptx`](STEAM_Project_v2.pptx) | 29-slide deck for the 10-minute booth slot. |
+| [`docs/architecture.md`](docs/architecture.md) | System overview with mermaid diagrams — share with judges/teammates. |
+| [`docs/demo_scripts.md`](docs/demo_scripts.md) | Every copy-pasteable demo command, grouped by purpose. |
+| [`docs/raspberry_pi_setup.md`](docs/raspberry_pi_setup.md) | Fresh-Pi-5 install and demo-day checklist. |
+| [`docs/external_data.md`](docs/external_data.md) | How to source higher-resolution surveillance footage (VIRAT, Mixkit, Pexels). |
+| [`docs/writeup_updates.md`](docs/writeup_updates.md) | Drop-in section content used to build the analysis. |
+
+(The earlier `analysis.docx`, `showcase.pptx`, and `poster.pdf` are kept as backups from the first submission cut.)
+
+---
+
+## Headline numbers
+
+Measured on 20 stratified real CCTV clips (Kaggle CCTV Action-Recognition dataset, 13 action classes) plus a 1080p VIRAT outdoor clip.
+
+| Setting | Baseline H.265 | Ours bgfg | Saved |
+|---|---|---|---|
+| 20-clip aggregate @ CRF 22 | 256.4 KB | 213.4 KB | **17%** |
+| 20-clip aggregate @ CRF 28 | 134.2 KB | 118.4 KB | **12%** |
+| VIRAT 1080p outdoor @ CRF 22 | 3149.8 KB | 1675.9 KB | **47%** |
+
+Subjects remain fully visible in every clip in the catalog. The honest framing: the per-clip win scales with how much of the frame is static background, so the codec gets *better* as cameras move to higher resolution and wider angles — the direction surveillance is already going. See [`docs/architecture.md`](docs/architecture.md) for the why and [`docs/demo_scripts.md`](docs/demo_scripts.md) for how to reproduce.
 
 ---
 
@@ -41,149 +48,106 @@ The whole thing runs on a laptop with a built-in webcam — no special hardware 
 
 ```bash
 git clone https://github.com/SaiAmartya/steam-icac-2026.git
-cd "steam-icac-2026"
+cd steam-icac-2026
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-Option 1: Use setup.sh file (macOS only)
-```bash 
-chmod +x setup.sh
-./setup.sh                          # installs ffmpeg via Homebrew + creates .venv + pip install
-source .venv/bin/activate
-```
-
-Alternative: Use `just setup` (cross platform)
+The three demos worth running first:
 
 ```bash
-just setup
-```
-You need to install [just](https://github.com/casey/just) for this to work
-
-# 1) Generate a 10-second synthetic surveillance clip
-```bash
-python scripts/make_test_video.py
-```
-
-# 2) Run the full pipeline
-```bash
-python scripts/run_pipeline.py --input data/test.mp4 --out results --verbose
-```
-
-# 3) Live webcam demo (saliency overlay + gate HUD)
-
-```bash
+# 1. Live webcam saliency heatmap window
 python scripts/live_demo.py
+
+# 2. Webcam → 4-panel compressed comparison
+python scripts/photo_demo.py --codec bgfg --duration 5 --saliency yolo+spectral --show
+
+# 3. Apples-to-apples on any mp4 (VIRAT clip, your own footage, etc.)
+python scripts/bench_external.py --input path/to/clip.mp4 --saliency yolo+spectral --show
 ```
 
-The pipeline writes:
-- `results/ours_saliency.mp4` — our saliency-aware output.
-- `results/baseline_uniform.mp4` — same-CRF H.265 baseline for comparison.
-- `results/events.json` — every frame the gate triggered on.
-- `results/metrics.json` — file sizes, PSNR, SSIM, compression ratio.
+For the full reproducibility flow (encoding all 20 clips, regenerating the catalog and RD curve), see [`docs/demo_scripts.md`](docs/demo_scripts.md).
 
-### Linux
-
-The same commands work; replace the Homebrew step with `apt install ffmpeg`.
-
-### Windows
-
-Untested. Use WSL2 + Ubuntu or expect to figure out ffmpeg / libx265 yourself.
+**Running on a Raspberry Pi 5 instead of a laptop?** See [`docs/raspberry_pi_setup.md`](docs/raspberry_pi_setup.md).
 
 ---
 
 ## Code map
 
 ```
-STEAM IC/
-├── PLAN.md                      Full project plan — read this first
-├── README.md                    You're here
-├── LICENSE                      MIT
+steam-icac-2026/
+├── analysis_v2.docx                Showcase analysis (TNR 12, 1.15 spacing, 5 pages)
+├── STEAM_Project_v2.pptx           29-slide deck for the booth
+├── README.md                       You're here
+├── PLAN.md                         Original full project plan
+├── LICENSE                         MIT
 ├── requirements.txt
-├── setup.sh                     One-shot macOS setup
 │
 ├── docs/
-│   ├── 00-overview.md           Quick orientation for new collaborators
-│   └── research/                Four research briefs feeding the analysis
-│       ├── 01-saliency-compression.md
-│       ├── 02-hvs-principles.md
-│       ├── 03-neural-codecs.md
-│       └── 04-event-detection.md
+│   ├── architecture.md             System diagrams + how it works
+│   ├── demo_scripts.md             Copy-pasteable demo commands
+│   ├── raspberry_pi_setup.md       Pi 5 deployment guide
+│   ├── external_data.md            How to source 1080p+ test footage
+│   ├── writeup_updates.md          Drop-in analysis sections
+│   ├── 00-overview.md              Orientation for new collaborators
+│   └── research/                   Four research briefs feeding the analysis
 │
 ├── src/
-│   ├── gate.py                  Useful-footage detection (motion + flow + optional YOLO)
-│   ├── saliency.py              Per-frame saliency map (spectral-residual default)
-│   ├── compress.py              Saliency-aware compression (Tier C today; B/A planned)
-│   ├── neural_codec.py          Tiny conv autoencoder — the "Option 1" side-by-side
-│   ├── metrics.py               PSNR / SSIM / LPIPS wrappers
-│   └── pipeline.py              End-to-end orchestrator
+│   ├── saliency.py                 YOLO+spectral+motion saliency backends
+│   ├── gate.py                     Useful-footage gate (motion + flow + YOLO)
+│   ├── bg_fg_codec.py              ← The headline innovation: bg/fg decomposition codec
+│   ├── compress.py                 Saliency-aware blur+H.265 pipeline (prior approach)
+│   ├── pipeline.py                 End-to-end orchestrator for the prior approach
+│   ├── neural_codec.py             Tiny autoencoder (the naïve learned-codec baseline)
+│   └── metrics.py                  PSNR / SSIM / LPIPS / saliency-weighted PSNR
 │
 └── scripts/
-    ├── make_test_video.py       Synthetic test clip generator
-    ├── run_pipeline.py          CLI entry point
-    └── live_demo.py             Webcam demo with live HUD
+    ├── live_demo.py                Real-time webcam saliency heatmap window
+    ├── photo_demo.py               Webcam capture → 4-panel comparison PNG
+    ├── compare_clip.py             Build a side-by-side video for any clip
+    ├── saliency_video.py           Render a saliency-overlay video for any clip
+    ├── bench_external.py           Run the codec on any mp4 (VIRAT, Pexels, etc.)
+    ├── ablation_bgfg.py            Three-way comparison across all 20 clips × 3 CRFs
+    ├── qualitative_catalog_v2.py   Build the multi-page comparison PDF
+    ├── simulate_hour.py            Synth long-form footage for the hour-long argument
+    ├── run_pipeline.py             CLI for the prior sigmoid pipeline
+    ├── train_autoencoder.py        Trains the neural-codec baseline
+    ├── make_test_video.py          Synthetic test clip generator
+    └── (older ablation scripts: ablation_real.py, ablation_mask_modes.py, etc.)
 ```
 
-Every module exposes a small public API documented in its docstring; the `pipeline.py` orchestrator is the integration surface.
+Every module exposes a small public API documented in its docstring. `bg_fg_codec.py` is the integration surface for the headline codec; `pipeline.py` is the older sigmoid-blur path we keep as the prior baseline.
 
 ---
 
-## Status (as of 2026-04-30, 7 days into the build)
+## How the codec works (30-second version)
 
-**Deliverables ready for the May 1 submission and the May 28–29 booth:**
+1. **Sample 30 evenly-spaced frames** from the clip. Take the per-pixel temporal median — that's the background image. Short-lived foreground (people walking past) is rejected by the median.
+2. **For each frame**, compute a saliency map from three combined signals: YOLOv8n detections (semantic — people, vehicles, bags, animals), spectral residual (low-level novelty), and motion against the background image. Temporal-smooth across an 11-frame window.
+3. **Blend each frame against the background** using a sigmoid-shaped saliency mask, with a 0.25 floor so the original frame is never *fully* replaced. The blended stream goes to an unmodified `libx265` at the target CRF.
+4. **The output is a normal H.265 mp4.** Non-salient regions are byte-identical across consecutive frames, so the codec's inter-frame prediction emits skip flags rather than residuals. All the bits move to the foreground.
 
-| File | What it is |
-|---|---|
-| [`analysis.docx`](analysis.docx) | The 5-page analysis for the dropbox submission. TNR 12, 1.15 spacing, 1" margins. |
-| [`showcase.pptx`](showcase.pptx) | The 12-slide deck for the 10-minute live showcase. |
-| [`showcase.pdf`](showcase.pdf) | PDF preview of the deck (for fallback / printing). |
-| [`poster.pdf`](poster.pdf) | Single-page printable booth poster (A3 landscape). |
-| [`poster.png`](poster.png) | PNG version of the poster. |
-
-**Headline measured numbers** (real CCTV, 20 stratified clips across 13 action classes from the public Kaggle CCTV Action-Recognition dataset):
-
-- **+0.44 dB sal-PSNR vs uniform H.265 at iso-bitrate (~45 KB)** — saliency-aware compression matches or beats baseline below the ~50 KB crossover, exactly the regime edge surveillance actually operates in.
-- **+6.6 dB sal-PSNR** from the sigmoid-mask methodology over the legacy soft alpha-blend (mask-mode ablation).
-- **65.2% gate trigger ratio** on real CCTV — sensor fusion validated across all 13 action classes.
-- **76,131-parameter TinyAutoencoder** trained on 1,997 frames sampled from the full 2,288-clip dataset; **1.43 ms encode / 1.35 ms decode** on Apple M3 Pro MPS; 28.95 dB reconstruction PSNR at 6× compression — first-person edge measurement that quantifies the "AI compression is 300× better but we don't use it" claim.
-- **>90 fps end-to-end** on a laptop CPU — real-time-capable.
-- **23% file-size reduction at fixed CRF**; ~32 kg CO₂ per camera per year, ~32 tonnes annually for a 1,000-camera deployment.
-
-Full results tables live in [`docs/results_summary.md`](docs/results_summary.md) — the single source of truth that the analysis, deck, and poster all read from. Raw rows: `results/ablation_real/`, `results/ablation_sigmoid/`, `results/ablation_mask/`, `results/neural_codec/`.
-
-**Honest limitations** (called out in §8 of the analysis):
-- The saliency model is classical (spectral-residual). A learned saliency CNN (TASED-Net) would tighten where the salient-region mask lands.
-- Tier-C (pre-blur) is the implemented compression path. Tier-A (true per-block QP via libx265's ROI API) would avoid the LPIPS penalty for non-salient blur.
-- LPIPS is whole-frame; a saliency-weighted LPIPS is the natural next perceptual metric.
-- No Pi-4 first-person edge measurement yet — autoencoder latency on Apple Silicon (1.43 ms) is the current data point.
-
-**See `PLAN.md` §10 for the original day-by-day timeline.**
+See [`docs/architecture.md`](docs/architecture.md) for the diagrams.
 
 ---
 
-## Where the help is needed
+## Honest limitations
 
-If you've just landed on the project and want to pick something up, here are the high-leverage things:
+The codec assumes a **stationary camera**. Pan/tilt/zoom footage breaks the temporal-median background model, and handheld VIRAT clips lose roughly half the size advantage. When a subject **fills most of the frame** (close-ups, dense two-person scenes), there's barely any background to replace and savings shrink toward zero. When a subject **stands still for >50% of the clip duration**, the median absorbs them into the background — the codec then "sees" them as part of the scene.
 
-| Stream | Skill needed | Effort | What it unblocks |
-|---|---|---|---|
-| Real footage acquisition | none — just downloading and labelling | half a day | Replaces synthetic clip; unblocks all real numbers in the analysis. VIRAT or CMU Avenue dataset. |
-| Gate tuning on real footage | OpenCV familiarity | half a day | Right MOG2 / flow thresholds + small hand-labelled set for fusion-weight learning. |
-| Compression Tier B upgrade | ffmpeg + Python | 1 day | Per-frame average-QP via `--qp-file`, replacing the Tier C blur fallback. |
-| Neural codec training | PyTorch | 1 day | Real numbers for the side-by-side comparison: encode/decode latency, PSNR vs file size on a few hundred real frames. |
-| Fractyl3D architecture diagram | drawing chops | half a day | Hits the Analysis & Presentation criterion explicitly. |
-| Analysis document drafting | scientific writing | 2 days | The actual deliverable. 5 pages, structure already laid out in `PLAN.md §11`. |
-| Showcase rehearsal & poster | presentation chops | post-May 1 | The 7 model points hinge on a clean live demo. |
+These are scope restrictions, not bugs. Most home surveillance deployments are stationary cameras watching mostly-empty spaces, which is exactly where the codec wins. The deck and the analysis call out all three failure modes explicitly.
 
-If you're not sure where to slot in, ping Sai and we'll match you to whatever's the bottleneck that day.
+We also report **saliency-weighted PSNR** (sal-PSNR), which only counts error inside regions our saliency map said matter. Plain PSNR penalises us for intentionally replacing background pixels — which is the *contract* of the codec, not a bug. See §7 of `analysis_v2.docx` for the metric defense.
 
 ---
 
 ## Conventions
 
 - **Python 3.10+**, type hints, docstrings, no prints in library code (use `logging`).
-- **No data committed.** `data/` and `results/` are gitignored.
-- **No model weights committed.** They're either downloaded by the user or trained locally. Keeps the repo small.
-- **Imports.** Modules under `src/` use relative imports (`from .gate import ...`). Scripts under `scripts/` add `src/` to `sys.path` and use absolute imports.
-- **PRs.** Small and focused. One logical change per branch. Reference the `PLAN.md` section your change touches in the PR description.
+- **No data committed.** `data/` and most of `results/` are gitignored — see `.gitignore` for exactly what's kept.
+- **No model weights committed.** YOLOv8n auto-downloads on first call (~6 MB).
+- **Imports.** Modules under `src/` use relative imports (`from .gate import ...`). Scripts under `scripts/` add the repo root to `sys.path` and use absolute imports.
+- **Smart quotes are ASCII** in source code, fancy in writeups.
 
 ---
 
@@ -195,4 +159,4 @@ If you're not sure where to slot in, ping Sai and we'll match you to whatever's 
 
 ## Inspiration
 
-Sebastian Lague, *AI Compression is 300× Better (but we don't use it)* — https://www.youtube.com/watch?v=i6l3535vRjA. The video's framing (neural codecs are dramatically better in theory but impractical at the edge) is the hinge of the project.
+Sebastian Lague, *AI Compression is 300× Better (but we don't use it)* — https://www.youtube.com/watch?v=i6l3535vRjA. The video's framing — neural codecs are dramatically better in theory but impractical at the edge — is the hinge of the project, and the reason our trained autoencoder is included as the *naïve* learned-codec baseline rather than the actual contribution.
