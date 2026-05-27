@@ -18,15 +18,14 @@ The output is a standards-compliant H.265 mp4. Any decoder plays it back without
 
 | File | What it is |
 |---|---|
-| [`analysis_v2.docx`](analysis_v2.docx) | The 5-page showcase analysis. Times New Roman 12, 1.15 spacing, 1" margins — STEAM IC spec exactly. |
-| [`STEAM_Project_v2.pptx`](STEAM_Project_v2.pptx) | 29-slide deck for the 10-minute booth slot. |
+| [`analysis.docx`](analysis.docx) | The 5-page showcase analysis. Times New Roman 12, 1.15 spacing, 1" margins — STEAM IC spec exactly. |
+| [`STEAM_Project.pptx`](STEAM_Project.pptx) | 29-slide deck for the 10-minute booth slot. |
 | [`docs/architecture.md`](docs/architecture.md) | System overview with mermaid diagrams — share with judges/teammates. |
 | [`docs/demo_scripts.md`](docs/demo_scripts.md) | Every copy-pasteable demo command, grouped by purpose. |
 | [`docs/raspberry_pi_setup.md`](docs/raspberry_pi_setup.md) | Fresh-Pi-5 install and demo-day checklist. |
 | [`docs/external_data.md`](docs/external_data.md) | How to source higher-resolution surveillance footage (VIRAT, Mixkit, Pexels). |
 | [`docs/writeup_updates.md`](docs/writeup_updates.md) | Drop-in section content used to build the analysis. |
 
-(The earlier `analysis.docx`, `showcase.pptx`, and `poster.pdf` are kept as backups from the first submission cut.)
 
 ---
 
@@ -76,8 +75,8 @@ For the full reproducibility flow (encoding all 20 clips, regenerating the catal
 
 ```
 steam-icac-2026/
-├── analysis_v2.docx                Showcase analysis (TNR 12, 1.15 spacing, 5 pages)
-├── STEAM_Project_v2.pptx           29-slide deck for the booth
+├── analysis.docx                Showcase analysis (TNR 12, 1.15 spacing, 5 pages)
+├── STEAM_Project.pptx           29-slide deck for the booth
 ├── README.md                       You're here
 ├── PLAN.md                         Original full project plan
 ├── LICENSE                         MIT
@@ -137,7 +136,7 @@ The codec assumes a **stationary camera**. Pan/tilt/zoom footage breaks the temp
 
 These are scope restrictions, not bugs. Most home surveillance deployments are stationary cameras watching mostly-empty spaces, which is exactly where the codec wins. The deck and the analysis call out all three failure modes explicitly.
 
-We also report **saliency-weighted PSNR** (sal-PSNR), which only counts error inside regions our saliency map said matter. Plain PSNR penalises us for intentionally replacing background pixels — which is the *contract* of the codec, not a bug. See §7 of `analysis_v2.docx` for the metric defense.
+We also report **saliency-weighted PSNR** (sal-PSNR), which only counts error inside regions our saliency map said matter. Plain PSNR penalises us for intentionally replacing background pixels — which is the *contract* of the codec, not a bug. See §7 of `analysis.docx` for the metric defense.
 
 ---
 

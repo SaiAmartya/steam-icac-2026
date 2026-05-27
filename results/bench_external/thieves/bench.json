@@ -1,0 +1,74 @@
+{
+  "input": "/Users/saiamartya/Documents/Claude/Projects/STEAM IC/data/external/thieves.mp4",
+  "resolution": [
+    1920,
+    1080
+  ],
+  "fps": 24.0,
+  "duration_s": 21.458333333333332,
+  "n_frames": 515,
+  "saliency_backend": "yolo+spectral",
+  "raw_input_bytes": 66411322,
+  "per_crf": [
+    {
+      "crf": 22,
+      "baseline_bytes": 1635083,
+      "bgfg_bytes": 1456879,
+      "saved_pct": 10.898773946032092,
+      "baseline": {
+        "psnr_mean": 47.65170223873836,
+        "ssim_mean": 0.9886667057275773,
+        "sal_psnr_mean": 45.09068391441122,
+        "n_frames_evaluated": 35
+      },
+      "bgfg": {
+        "psnr_mean": 35.01934635990635,
+        "ssim_mean": 0.9764330099463164,
+        "sal_psnr_mean": 35.59599446964456,
+        "n_frames_evaluated": 35
+      },
+      "encode_baseline_s": 6.233006954193115,
+      "encode_bgfg_s": 65.34716987609863
+    },
+    {
+      "crf": 28,
+      "baseline_bytes": 858186,
+      "bgfg_bytes": 792169,
+      "saved_pct": 7.692621413073619,
+      "baseline": {
+        "psnr_mean": 45.355791493296735,
+        "ssim_mean": 0.9846077659324907,
+        "sal_psnr_mean": 42.1175284031207,
+        "n_frames_evaluated": 35
+      },
+      "bgfg": {
+        "psnr_mean": 34.83922938825108,
+        "ssim_mean": 0.9729610075946624,
+        "sal_psnr_mean": 34.98910376949808,
+        "n_frames_evaluated": 35
+      },
+      "encode_baseline_s": 6.179640054702759,
+      "encode_bgfg_s": 62.10740089416504
+    },
+    {
+      "crf": 34,
+      "baseline_bytes": 489883,
+      "bgfg_bytes": 457623,
+      "saved_pct": 6.5852458648289485,
+      "baseline": {
+        "psnr_mean": 42.52598435843753,
+        "ssim_mean": 0.9775547497923989,
+        "sal_psnr_mean": 38.89053045850565,
+        "n_frames_evaluated": 35
+      },
+      "bgfg": {
+        "psnr_mean": 34.46079053920959,
+        "ssim_mean": 0.9666314358942407,
+        "sal_psnr_mean": 33.9433938781914,
+        "n_frames_evaluated": 35
+      },
+      "encode_baseline_s": 5.747186899185181,
+      "encode_bgfg_s": 63.815882205963135
+    }
+  ]
+}
