@@ -94,8 +94,14 @@ class FramePipeEncoder:
             "-preset", self.cfg.preset,
             "-crf", f"{self.cfg.crf}",
             "-pix_fmt", "yuv420p",
-            out_path,
         ]
+        # macOS QuickTime requires the hvc1 codec tag for H.265-in-MP4 playback;
+        # ffmpeg defaults to hev1 which QuickTime refuses. Same bitstream either
+        # way — just a metadata flag in the container. Apply only for libx265
+        # (libx264 / other codecs would reject this tag).
+        if self.cfg.codec in ("libx265", "hevc"):
+            cmd += ["-tag:v", "hvc1"]
+        cmd.append(out_path)
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
         assert proc.stdin is not None
 
@@ -135,8 +141,13 @@ def encode_uniform(
     cmd = [
         "ffmpeg", "-y", "-i", input_path,
         "-c:v", codec, "-preset", preset, "-crf", f"{crf}",
-        "-pix_fmt", "yuv420p", out_path,
+        "-pix_fmt", "yuv420p",
     ]
+    # hvc1 tag for macOS QuickTime compatibility (libx265 only — see
+    # FramePipeEncoder.encode above for the rationale).
+    if codec in ("libx265", "hevc"):
+        cmd += ["-tag:v", "hvc1"]
+    cmd.append(out_path)
     subprocess.run(cmd, check=True, stderr=subprocess.DEVNULL)
     return {"out_path": out_path, "bytes": os.path.getsize(out_path)}
 
