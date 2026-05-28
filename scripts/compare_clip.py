@@ -1,16 +1,29 @@
 """
 Side-by-side full-video comparison for a single clip.
 
-Produces ONE playable mp4 with up to 3 panels stacked horizontally:
-    original | saliency overlay | baseline H.265 | ours_bgfg
+Two output modes:
 
-Best for live demos and slide reveals — judges can play the file in QuickTime
-and watch all versions in lockstep.
+  * default      — single row, panels stacked horizontally:
+                     original [ | saliency overlay ] | baseline H.265 | ours_bgfg
+
+  * --internals  — 2-row grid (top 2 panels centered, bottom 3 panels full-width)
+                   that tells the codec's whole story in a single frame:
+                     Top: [black] | original | baseline H.265 | [black]   ← INPUT vs DUMB BASELINE
+                     Bot: saliency mask | static background ref | ours_bgfg ← HOW WE DO BETTER
+                   Use `--panel-scale 0.5` to keep the final mp4 at 1080p.
+
+The bottom row is generated on the fly using the EXACT same code path as
+`BgFgCodec` — the saliency overlay shows the mask the codec actually sees
+per frame, and the background panel shows the temporal-median reference
+image (computed once per clip from 30 evenly-spaced samples — it does not
+change frame-to-frame; that constancy is exactly why H.265's inter-frame
+prediction collapses the non-salient regions to near-zero bytes).
 
 Usage:
     python scripts/compare_clip.py --clip clip_14 --crf 22
     python scripts/compare_clip.py --clip clip_04 --crf 28 --no-saliency
-    python scripts/compare_clip.py --clip clip_02 --crf 22 --out /tmp/grab_demo.mp4
+    python scripts/compare_clip.py --clip clip_02 --crf 22 --out /tmp/grab.mp4
+    python scripts/compare_clip.py --clip clip_virat --crf 22 --internals --panel-scale 0.5
 """
 from __future__ import annotations
 
@@ -34,14 +47,16 @@ ENCODED = ROOT / "results/ablation_bgfg/encoded"
 DEFAULT_OUT_DIR = ROOT / "results/comparisons"
 
 
+# ---------------------------------------------------------------------------
+# Frame helpers
+# ---------------------------------------------------------------------------
+
 def label_frame(frame_bgr: np.ndarray, text: str, sub: str = "") -> np.ndarray:
     """Stamp a label across the top of a frame."""
     out = frame_bgr.copy()
     h, w = out.shape[:2]
-    # Black strip top
     strip_h = max(28, h // 14)
     cv2.rectangle(out, (0, 0), (w, strip_h), (0, 0, 0), -1)
-    # Label
     cv2.putText(out, text, (10, int(strip_h * 0.68)),
                 cv2.FONT_HERSHEY_SIMPLEX, max(0.45, h / 700), (255, 255, 255), 1, cv2.LINE_AA)
     if sub:
@@ -50,41 +65,45 @@ def label_frame(frame_bgr: np.ndarray, text: str, sub: str = "") -> np.ndarray:
     return out
 
 
-def saliency_overlay_bgr(
+def kb(p: Path) -> float:
+    return p.stat().st_size / 1024 if p.exists() else 0.0
+
+
+def _saliency_alpha(
     frame_bgr: np.ndarray,
     estimator: SaliencyEstimator,
-    motion_helper: BgFgCodec | None = None,
-    background: np.ndarray | None = None,
-    smoother: TemporalSmoother | None = None,
+    motion_helper: BgFgCodec,
+    background: np.ndarray,
+    smoother: TemporalSmoother,
 ) -> np.ndarray:
-    """Overlay the EXACT mask the codec uses to drive the encoder.
+    """Compute the alpha mask BgFgCodec uses to decide keep-vs-replace per pixel.
 
-    Applies the same pipeline as src/bg_fg_codec.py:
+    Mirrors the pipeline in `src/bg_fg_codec.py`:
         sal_raw  = max(yolo+spectral, motion-from-background)
         sal      = TemporalSmoother(window=11).smooth(sal_raw)
-        alpha    = sigmoid_mask(sal, threshold=0.3, steepness=12)
+        alpha    = sigmoid_mask(sal, threshold=0.30, steepness=12.0)
         alpha    = max(alpha, mask_floor=0.25)
 
-    Without these steps the overlay would show a noisy single-frame mask
-    that doesn't reflect what's actually being encoded.
+    Returns: HxW float32 in [0,1]. 1 = keep frame pixel, 0 = fall back to background.
     """
     sal = estimator.predict(frame_bgr)
-    if motion_helper is not None and background is not None:
-        motion = motion_helper._motion_mask(frame_bgr, background)
-        sal = np.maximum(sal, motion)
-    if smoother is not None:
-        sal = smoother.smooth(sal)
-    # Apply sigmoid mask shaping + floor — match BgFgCodec._blend_frame()
+    motion = motion_helper._motion_mask(frame_bgr, background)
+    sal = np.maximum(sal, motion)
+    sal = smoother.smooth(sal)
     alpha = _build_alpha(sal, mode="sigmoid", threshold=0.30, steepness=12.0)
-    alpha = np.maximum(alpha, 0.25)  # mask_floor
+    return np.maximum(alpha, 0.25)
+
+
+def saliency_overlay_bgr(frame_bgr: np.ndarray, alpha: np.ndarray) -> np.ndarray:
+    """Overlay the JET-colormapped mask on the original frame for visualisation."""
     alpha_u8 = (np.clip(alpha, 0, 1) * 255).astype(np.uint8)
     heat = cv2.applyColorMap(alpha_u8, cv2.COLORMAP_JET)
     return cv2.addWeighted(frame_bgr, 0.55, heat, 0.45, 0.0)
 
 
-def kb(p: Path) -> float:
-    return p.stat().st_size / 1024 if p.exists() else 0.0
-
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -93,17 +112,32 @@ def main() -> None:
     parser.add_argument("--saliency", default="yolo+spectral",
                         choices=["spectral", "finegrained", "yolo", "yolo+spectral"])
     parser.add_argument("--no-saliency", action="store_true",
-                        help="Drop the saliency-overlay panel (2-panel output: original | baseline | bgfg becomes original | baseline | bgfg without overlay)")
+                        help="(single-row mode only) drop the saliency-overlay panel; "
+                             "gives a clean 3-panel original | baseline | ours_bgfg.")
+    parser.add_argument("--internals", action="store_true",
+                        help="2-row grid exposing codec internals. "
+                             "Top: [black] | original | baseline | [black] (2 panels centered). "
+                             "Bot: saliency mask | static background | ours_bgfg (3 panels full-width). "
+                             "Combine with --panel-scale 0.5 to keep the output at 1080p.")
+    parser.add_argument("--panel-scale", type=float, default=1.0,
+                        help="Per-panel downscale factor (default 1.0 = source resolution). "
+                             "Recommended 0.5 when --internals is on so 1080p source -> 540p "
+                             "panels -> a final 2880x1080 grid that plays smoothly on a Pi.")
     parser.add_argument("--out", type=Path, default=None,
                         help="Output mp4 path (default: results/comparisons/<clip>_crf<N>.mp4)")
     parser.add_argument("--show", action="store_true",
                         help="Open the result when done")
     args = parser.parse_args()
 
+    if args.internals and args.no_saliency:
+        raise SystemExit("--internals already shows a saliency panel; "
+                         "--no-saliency is for single-row mode only.")
+    if args.panel_scale <= 0 or args.panel_scale > 2.0:
+        raise SystemExit("--panel-scale must be in (0, 2.0].")
+
     orig_path = DATA / f"{args.clip}.mp4"
     base_path = ENCODED / f"baseline_crf{args.crf}_{args.clip}.mp4"
     bgfg_path = ENCODED / f"ours_bgfg_crf{args.crf}_{args.clip}.mp4"
-
     for p in (orig_path, base_path, bgfg_path):
         if not p.exists():
             raise SystemExit(f"Missing input: {p}\n"
@@ -112,51 +146,78 @@ def main() -> None:
     args.out = args.out or (DEFAULT_OUT_DIR / f"{args.clip}_crf{args.crf}.mp4")
     args.out.parent.mkdir(parents=True, exist_ok=True)
 
-    sal_est = SaliencyEstimator(backend=args.saliency) if not args.no_saliency else None
-
-    # For the overlay panel, build the same background + motion helper +
-    # temporal smoother the codec uses, so the overlay reflects EXACTLY
-    # what's driving the encoded output (not a noisy single-frame view).
+    # --- Saliency / background setup ---------------------------------------
+    need_sal_pipeline = args.internals or (not args.no_saliency)
+    sal_est = None
     motion_helper = None
     background = None
     overlay_smoother = None
-    if not args.no_saliency:
+    if need_sal_pipeline:
+        sal_est = SaliencyEstimator(backend=args.saliency)
+        print(f"  computing static background reference (30-sample temporal median)...")
         background = compute_background_median(str(orig_path), n_samples=30)
         motion_helper = BgFgCodec(BgFgConfig(saliency_backend=args.saliency))
         overlay_smoother = TemporalSmoother(window=11)
 
-    # Open every video
+    # --- Open source videos ------------------------------------------------
     caps = {"original": cv2.VideoCapture(str(orig_path)),
             "baseline": cv2.VideoCapture(str(base_path)),
             "bgfg":     cv2.VideoCapture(str(bgfg_path))}
-
-    # All inputs are at the source resolution + fps
     fps = caps["original"].get(cv2.CAP_PROP_FPS) or 30.0
     src_w = int(caps["original"].get(cv2.CAP_PROP_FRAME_WIDTH))
     src_h = int(caps["original"].get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    # Build the output panel order (preserve sensible left-to-right order)
-    order = ["original"]
-    if not args.no_saliency:
-        order.append("saliency")
-    order.append("baseline")
-    order.append("bgfg")
+    # --- Decide panel layout ----------------------------------------------
+    if args.internals:
+        # Top: black | original | baseline | black (2 centered panels,
+        # 0.5 panel-width borders on each side to match the 3-panel bottom row).
+        # Bottom: saliency mask | static background | ours_bgfg (full width).
+        top_order = ["original", "baseline"]
+        bot_order = ["saliency_mask", "background", "bgfg"]
+        n_cols = 3        # grid width is dictated by the bottom row
+        n_rows = 2
+    else:
+        top_order = ["original"]
+        if not args.no_saliency:
+            top_order.append("saliency_mask")
+        top_order += ["baseline", "bgfg"]
+        bot_order = []
+        n_cols = len(top_order)
+        n_rows = 1
 
-    panel_w, panel_h = src_w, src_h
-    out_w = panel_w * len(order)
-    out_h = panel_h
+    panel_w = max(2, int(src_w * args.panel_scale)) & ~1   # force even
+    panel_h = max(2, int(src_h * args.panel_scale)) & ~1
+    out_w = panel_w * n_cols
+    out_h = panel_h * n_rows
 
-    # Labels
+    # Black border for the centered top row (internals mode only). Width is
+    # half a panel on each side so total top width = panel + 2*panel = 3*panel.
+    border_w = panel_w // 2
+    black_border = np.zeros((panel_h, border_w, 3), dtype=np.uint8) if args.internals else None
+
+    # --- Labels (sizes in MB; % shows compression as a negative number) ---
     base_kb = kb(base_path); bgfg_kb = kb(bgfg_path)
-    pct = lambda k: f"{(1 - k/base_kb)*100:+.0f}%" if base_kb > 0 else "?"
+    base_mb = base_kb / 1024
+    bgfg_mb = bgfg_kb / 1024
+    orig_mb = kb(orig_path) / 1024
+    # k/base - 1 → negative when ours is smaller → "-81%" instead of "+81%"
+    pct = lambda k: f"{(k/base_kb - 1)*100:+.0f}%" if base_kb > 0 else "?"
     labels = {
-        "original":  ("original",                  f"{kb(orig_path):.0f} KB on disk"),
-        "saliency":  ("saliency overlay",          f"{args.saliency} + motion"),
-        "baseline":  (f"baseline H.265 (CRF {args.crf})", f"{base_kb:.0f} KB"),
-        "bgfg":      (f"ours_bgfg (CRF {args.crf})",     f"{bgfg_kb:.0f} KB  ({pct(bgfg_kb)})"),
+        "original":      ("original",                          f"{orig_mb:.1f} MB on disk"),
+        "baseline":      (f"baseline H.265 (CRF {args.crf})",  f"{base_mb:.1f} MB"),
+        "bgfg":          (f"ours_bgfg (CRF {args.crf})",       f"{bgfg_mb:.1f} MB  ({pct(bgfg_kb)})"),
+        "saliency_mask": ("saliency mask",                     f"{args.saliency} + motion fusion"),
+        "background":    ("static background reference",       "temporal median of 30 samples"),
     }
 
-    # Pipe rawvideo to ffmpeg for H.265 encoding of the output
+    # Pre-render the background panel once (it's identical every frame —
+    # that's the whole point of the codec).
+    if args.internals:
+        bg_resized = cv2.resize(background, (panel_w, panel_h)) if (panel_w, panel_h) != background.shape[1::-1] else background
+        title, sub = labels["background"]
+        bg_panel_cached = label_frame(bg_resized, title, sub)
+
+    # --- ffmpeg sink -------------------------------------------------------
     cmd = [
         "ffmpeg", "-y",
         "-f", "rawvideo", "-pix_fmt", "bgr24",
@@ -170,36 +231,67 @@ def main() -> None:
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
     assert proc.stdin is not None
 
-    print(f"  building {len(order)}-panel side-by-side: {' | '.join(order)}")
-    print(f"  output: {args.out}")
+    layout_desc = (" | ".join(top_order)
+                   + ("   //   " + " | ".join(bot_order) if bot_order else ""))
+    print(f"  building {n_rows}x{n_cols} grid: {layout_desc}")
+    print(f"  output dims: {out_w}x{out_h} @ {fps:.2f} fps")
+    print(f"  output file: {args.out}")
+
+    def panelize(name: str, raw: np.ndarray) -> np.ndarray:
+        """Resize a raw BGR frame to (panel_w, panel_h) and stamp its label."""
+        if (raw.shape[1], raw.shape[0]) != (panel_w, panel_h):
+            raw = cv2.resize(raw, (panel_w, panel_h))
+        title, sub = labels[name]
+        return label_frame(raw, title, sub)
 
     frame_idx = 0
     try:
         while True:
-            frames = {}
+            # Read the three source streams in lockstep.
+            raws = {}
+            done = False
             for name, cap in caps.items():
                 ok, f = cap.read()
                 if not ok:
-                    frames = None
+                    done = True
                     break
-                if (f.shape[1], f.shape[0]) != (panel_w, panel_h):
-                    f = cv2.resize(f, (panel_w, panel_h))
-                frames[name] = f
-            if frames is None:
+                raws[name] = f
+            if done:
                 break
 
-            if not args.no_saliency:
-                frames["saliency"] = saliency_overlay_bgr(
-                    frames["original"], sal_est, motion_helper, background,
-                    smoother=overlay_smoother,
-                )
+            # Build the codec-internals panels (if requested).
+            if args.internals:
+                orig = raws["original"]
+                alpha = _saliency_alpha(orig, sal_est, motion_helper, background, overlay_smoother)
+                raws["saliency_mask"] = saliency_overlay_bgr(orig, alpha)
+                # "background" is rendered from the cached pre-labelled bg panel
+            elif not args.no_saliency:
+                orig = raws["original"]
+                alpha = _saliency_alpha(orig, sal_est, motion_helper, background, overlay_smoother)
+                raws["saliency_mask"] = saliency_overlay_bgr(orig, alpha)
 
-            # Compose row left-to-right
-            row = []
-            for name in order:
-                title, sub = labels[name]
-                row.append(label_frame(frames[name], title, sub))
-            composed = np.hstack(row)
+            # Compose the top row.
+            top_panels = [panelize(n, raws[n]) for n in top_order]
+            if args.internals:
+                # Centre the 2 panels with half-panel black borders on each side
+                # so the top row width matches the 3-panel bottom row exactly.
+                top_row = np.hstack([black_border, *top_panels, black_border])
+            else:
+                top_row = np.hstack(top_panels)
+
+            # Compose the bottom row (internals only).
+            if bot_order:
+                bot_panels = []
+                for n in bot_order:
+                    if n == "background":
+                        bot_panels.append(bg_panel_cached)
+                    else:
+                        bot_panels.append(panelize(n, raws[n]))
+                bot_row = np.hstack(bot_panels)
+                composed = np.vstack([top_row, bot_row])
+            else:
+                composed = top_row
+
             proc.stdin.write(composed.tobytes())
             frame_idx += 1
             if frame_idx % 30 == 0:

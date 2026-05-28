@@ -59,3 +59,6 @@ slide-*.jpg
 analysis_pg-*.jpg
 v2_slide-*.jpg
 docx_page-*.jpg
+
+# Packaged bundle for shipping to the Pi partner (regenerable)
+pi_demo.zip

@@ -4,8 +4,12 @@ STEAM IC — Raspberry Pi showcase demo.
 
 Replays the saliency-aware compression pipeline log output using the
 measured numbers from the M3 Pro reference run, then opens the
-pre-computed 3-panel side-by-side comparison video that ships next to
-this script (clip_virat_crf22.mp4).
+pre-computed 2-row comparison video that ships next to this script
+(clip_virat_crf22.mp4).
+
+Layout of the comparison video:
+    Top row    : original | baseline H.265           (input vs dumb baseline)
+    Bottom row : saliency mask | static background | ours_bgfg   (the machinery + result)
 
 This script does NOT re-encode anything — the bg/fg codec is heavy and
 takes minutes on a Mac; the Pi prototype just plays back the cached
@@ -27,8 +31,8 @@ from pathlib import Path
 # ----------------------------------------------------------------------
 # Measured numbers from the reference run (Mac M3 Pro, May 2026).
 # These are the REAL outputs of:
-#   ablation_bgfg.py --clips clip_virat --crfs 22 --saliency yolo+spectral
-#   compare_clip.py --clip clip_virat --crf 22 --no-saliency
+#   ablation_bgfg.py  --clips clip_virat --crfs 22 --saliency yolo+spectral
+#   compare_clip.py   --clip clip_virat --crf 22 --internals --panel-scale 0.5
 # ----------------------------------------------------------------------
 
 CLIP_ID                  = "clip_virat"
@@ -43,14 +47,16 @@ SOURCE_DURATION_S        = 75.2
 SOURCE_BITRATE_KBPS      = 17653
 SOURCE_SIZE_MB           = 158
 
-BASELINE_SIZE_KB         = 34683.2
+BASELINE_SIZE_MB         = 33.9     # libx265 CRF 22, 75 s of 1080p surveillance
 BASELINE_SAL_PSNR_DB     = 37.44
 
-OURS_SIZE_KB             = 6651.8
+OURS_SIZE_MB             = 6.5      # bg/fg codec, same CRF, same source
 OURS_SAL_PSNR_DB         = 34.76
 
+# The 2-row demo grid: 2880x1080 (panels at half-scale), libx264 CRF 18 preview
 COMPARE_FRAMES           = 2255
-COMPARE_SIZE_MB          = 168
+COMPARE_SIZE_MB          = 43
+COMPARE_GRID_DIMS        = "2880x1080"
 
 # ----------------------------------------------------------------------
 # Pacing — total runtime ~26 s. Tune SPEED_MULTIPLIER to scale uniformly.
@@ -157,7 +163,7 @@ def main() -> int:
     tick("preset = fast")
     progress("encoding", SOURCE_FRAMES, n_steps=5, per_step_s=0.70)
     tick(f"[1/2] {CLIP_ID} crf{CRF} baseline   "
-         f"{BASELINE_SIZE_KB:8.1f} KB  sal-PSNR {BASELINE_SAL_PSNR_DB:.2f} dB",
+         f"{BASELINE_SIZE_MB:5.1f} MB  sal-PSNR {BASELINE_SAL_PSNR_DB:.2f} dB",
          pause=0.5)
 
     # ----- ours_bgfg encode -----
@@ -172,26 +178,29 @@ def main() -> int:
     tick("motion fusion    = max(YOLO+spectral, frame-vs-background)", pause=0.3)
     progress("encoding", SOURCE_FRAMES, n_steps=5, per_step_s=0.85)
     tick(f"[2/2] {CLIP_ID} crf{CRF} bgfg       "
-         f"{OURS_SIZE_KB:8.1f} KB  sal-PSNR {OURS_SAL_PSNR_DB:.2f} dB",
+         f"{OURS_SIZE_MB:5.1f} MB  sal-PSNR {OURS_SAL_PSNR_DB:.2f} dB",
          pause=0.5)
 
-    # ----- 3-panel side-by-side -----
-    header("[4/4] Building 3-panel side-by-side video")
-    tick("layout: original | baseline H.265 | ours_bgfg")
+    # ----- 2-row demo grid -----
+    header("[4/4] Building 2-row demo grid (outcomes on top, machinery on bottom)")
+    tick("top row    : [black] | original | baseline H.265 | [black]")
+    tick("bottom row : saliency mask | static background | ours_bgfg")
+    tick(f"output grid: {COMPARE_GRID_DIMS} @ {SOURCE_FPS} fps "
+         f"(panels at half source resolution)", pause=0.3)
     tick("re-encoding panels via libx264 CRF 18 (preview quality)", pause=0.4)
     progress("composing", COMPARE_FRAMES, n_steps=4, per_step_s=0.65)
     tick(f"done — {COMPARE_FRAMES} frames, {COMPARE_SIZE_MB} MB", pause=0.3)
 
     # ----- Headline numbers -----
     header("Sizes")
-    print(f"  original         : {SOURCE_SIZE_MB:>6} MB")
-    print(f"  baseline H.265   : {BASELINE_SIZE_KB / 1024:>6.1f} MB   (CRF {CRF})")
-    print(f"  ours_bgfg        : {OURS_SIZE_KB / 1024:>6.1f} MB   (CRF {CRF})")
+    print(f"  original         : {SOURCE_SIZE_MB:>5} MB")
+    print(f"  baseline H.265   : {BASELINE_SIZE_MB:>5.1f} MB   (CRF {CRF})")
+    print(f"  ours_bgfg        : {OURS_SIZE_MB:>5.1f} MB   (CRF {CRF})")
     print()
-    savings = (1.0 - OURS_SIZE_KB / BASELINE_SIZE_KB) * 100.0
+    savings = (1.0 - OURS_SIZE_MB / BASELINE_SIZE_MB) * 100.0
     sal_delta = OURS_SAL_PSNR_DB - BASELINE_SAL_PSNR_DB
     print(f"  ours_bgfg saves  : {savings:.1f}% vs baseline H.265 at the same CRF")
-    print(f"  sal-PSNR delta   : {sal_delta:+.2f} dB on salient regions")
+    print(f"  sal-PSNR delta   : {sal_delta:+.2f} dB on the salient regions we promised to keep")
     _wait(0.4)
 
     elapsed = time.time() - t0
@@ -199,7 +208,7 @@ def main() -> int:
 
     # ----- Open the cached comparison video -----
     line("")
-    line("opening 3-panel comparison video ...", pause=0.3)
+    line("opening demo grid video ...", pause=0.3)
     if not COMPARISON_VIDEO.exists():
         print()
         print(f"ERROR: comparison video not found.")
