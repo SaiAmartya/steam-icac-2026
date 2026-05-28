@@ -7,9 +7,10 @@ the actual encoder on slow hardware.
 
 ## What's in here
 
-- `demo_pi.py` — replays the pipeline log output with the real measured
-  numbers from the M3 Pro reference run, then opens the cached demo grid
-  video.
+- `gui.py` — graphical front end. Launch this for a button-driven demo
+  experience (recommended for the booth). Requires `python3-tk`.
+- `demo_pi.py` — pure-stdlib console replay of the pipeline. Launch this
+  if you want to run from the terminal, or if tkinter isn't installed.
 - `clip_virat_crf22.mp4` (~43 MB) — the pre-computed 2-row demo grid:
 
   | layout    | left              | middle              | right        |
@@ -23,19 +24,13 @@ the actual encoder on slow hardware.
   result is the file in the bottom-right."* Every panel is labelled with
   its on-disk MB and ours_bgfg shows its size delta vs baseline.
 
-  The video file ships **out-of-band, not in git** (would push the bundle
-  over GitHub's 100 MB file limit). It comes from
-  `results/comparisons/clip_virat_crf22.mp4` after running
-  `scripts/compare_clip.py --clip clip_virat --crf 22 --internals
-  --panel-scale 0.5`. Drop it next to `demo_pi.py` and you're set.
-
 ## Setup
 
-Make sure both files live in the same directory. No Python dependencies
+Make sure all four files live in the same directory. No Python dependencies
 beyond the standard library are required.
 
 A video player is needed for the final "open" step. On Raspberry Pi OS
-Desktop, any of these work and the script picks the first one available:
+Desktop, any of these work and the demo picks the first one available:
 
 - `vlc` (recommended; usually pre-installed on Pi OS Desktop)
 - `mpv`
@@ -49,14 +44,35 @@ Install VLC if it's missing:
 sudo apt install vlc
 ```
 
+If you want to use the `gui.py` front end, also ensure tkinter is present
+(usually preinstalled on Pi OS Desktop):
+
+```bash
+sudo apt install python3-tk
+```
+
 ## Run
+
+**Recommended — GUI:**
+
+```bash
+python3 gui.py
+```
+
+A minimal window opens with a single "Run Compression Pipeline Demo"
+button and a streaming log pane underneath. Click the button. The
+log streams the pipeline stages in real time and the comparison
+video opens in your default player when finished.
+
+**Console-only fallback:**
 
 ```bash
 python3 demo_pi.py
 ```
 
-The script logs each pipeline stage at a smooth pace and finishes by
-opening the demo grid video in your default player.
+Same demo, but the log streams to your terminal and the video opens
+when the script finishes. Use this if tkinter isn't installed or you
+prefer a terminal-driven workflow.
 
 ## Numbers shown by the demo
 
@@ -83,7 +99,11 @@ the top of `demo_pi.py`:
   `OURS_SAL_PSNR_DB`, `SOURCE_*`, `COMPARE_*` — set to the real measured
   numbers from your `ablation_bgfg.py` / `compare_clip.py --internals` run
 
+`gui.py` calls into `demo_pi.py`, so updating the constants there is
+sufficient for both entry points.
+
 ## Pacing knob
 
-`SPEED_MULTIPLIER` (default `1.0`) scales every sleep uniformly. Set to
-`0.5` to halve the runtime; `2.0` to slow it down for a longer talk track.
+`SPEED_MULTIPLIER` in `demo_pi.py` (default `1.0`) scales every sleep
+uniformly. Set to `0.5` to halve the runtime; `2.0` to slow it down
+for a longer talk track.
