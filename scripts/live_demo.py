@@ -1,63 +1,226 @@
 """
-Live webcam demo.
+Live webcam demo — saliency mask at the same quality as the compression pipeline.
 
-Opens the default camera, overlays the saliency heatmap on the feed, and shows
-the gate's live usefulness score. Press 'q' to quit.
+Opens the default camera, runs the FULL bg/fg saliency pipeline on every frame
+(yolo + spectral + motion-vs-background, sigmoid mask shaping, temporal
+smoothing), and overlays the JET-coloured mask on the live feed. Shows the
+gate's usefulness score in a HUD.
 
-  python scripts/live_demo.py
+This matches the saliency-mask panel produced by `compare_clip.py --internals`
+on a recorded clip — same backends, same fusion, same smoothing window, same
+sigmoid threshold/steepness, same 0.25 floor, same alpha-blend weights.
+
+Why this differs from the previous version:
+    The old live_demo used `backend='spectral'` with a 5-frame smoother and no
+    motion mask. Spectral residual is novelty-driven and lights up any textured
+    region (TVs, posters, edges of windows) — not "the things you care about".
+    The codec's saliency mask is much better because it ALSO uses YOLOv8n
+    semantic detection (knows people / vehicles / bags / animals) AND a motion
+    mask from background subtraction. Per-pixel max fuses all three so anything
+    flagged by any signal counts as salient.
+
+Calibration:
+    Motion-vs-background requires a "background image" — for a recorded clip
+    we take the temporal median of 30 evenly-spaced samples. For a live camera
+    we capture N frames at startup (`--bg-samples`, default 60 = ~2s @ 30fps)
+    with you out of frame, then use that as the static background for the
+    session. Press 'r' any time to recalibrate.
+
+Keys (focus the OpenCV window):
+    q   quit
+    r   recalibrate background (step out of frame first)
+    s   save the current frame to results/live_demo_snap.png
+
+Usage:
+    python scripts/live_demo.py
+    python scripts/live_demo.py --camera 1
+    python scripts/live_demo.py --saliency yolo            # YOLO only, fastest
+    python scripts/live_demo.py --bg-samples 90            # 3s calibration
+    python scripts/live_demo.py --mask-only                # just the heatmap
 """
 from __future__ import annotations
 
+import argparse
 import sys
+import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 import cv2
 import numpy as np
 
 from src.gate import FootageGate
 from src.saliency import SaliencyEstimator, TemporalSmoother
+from src.bg_fg_codec import BgFgCodec, BgFgConfig
+from src.compress import _build_alpha
 
 
-def main(camera_index: int = 0) -> None:
-    cap = cv2.VideoCapture(camera_index)
+# Match the compression pipeline exactly — every constant below mirrors
+# BgFgCodec / compare_clip.py so the live overlay is identical to what
+# the codec sees per frame on a recorded clip.
+SMOOTH_WINDOW       = 11
+MASK_THRESHOLD      = 0.30
+MASK_STEEPNESS      = 12.0
+MASK_FLOOR          = 0.25
+OVERLAY_FRAME_W     = 0.55
+OVERLAY_HEAT_W      = 0.45
+
+SNAP_PATH           = ROOT / "results" / "live_demo_snap.png"
+
+
+# ----------------------------------------------------------------------
+# Background calibration
+# ----------------------------------------------------------------------
+
+def calibrate_background(cap: cv2.VideoCapture, n_samples: int, window_name: str) -> np.ndarray | None:
+    """Capture N frames with a countdown overlay; return their per-pixel median."""
+    samples: list[np.ndarray] = []
+    print(f"Calibrating background — step OUT of frame for ~{n_samples / 30:.1f}s...")
+    while len(samples) < n_samples:
+        ok, frame = cap.read()
+        if not ok:
+            continue
+        samples.append(frame)
+
+        # On-screen countdown
+        h, w = frame.shape[:2]
+        secs_left = max(0.0, (n_samples - len(samples)) / 30.0)
+        msg1 = "CALIBRATING BACKGROUND"
+        msg2 = f"step out of frame  -  {secs_left:.1f}s left"
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (0, 0), (w, 80), (0, 0, 0), -1)
+        frame = cv2.addWeighted(overlay, 0.55, frame, 0.45, 0.0)
+        cv2.putText(frame, msg1, (12, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 220, 255), 2)
+        cv2.putText(frame, msg2, (12, 62), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (220, 220, 220), 1)
+        cv2.imshow(window_name, frame)
+        if (cv2.waitKey(1) & 0xFF) == ord("q"):
+            return None
+
+    background = np.median(np.stack(samples, axis=0), axis=0).astype(np.uint8)
+    print(f"Background captured ({n_samples} frames). Now step into the frame!")
+    return background
+
+
+# ----------------------------------------------------------------------
+# Main loop
+# ----------------------------------------------------------------------
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--camera", type=int, default=0, help="Camera index (default 0)")
+    parser.add_argument("--saliency", default="yolo+spectral",
+                        choices=["spectral", "finegrained", "yolo", "yolo+spectral"],
+                        help="Saliency backend (default yolo+spectral — same as the codec)")
+    parser.add_argument("--bg-samples", type=int, default=60,
+                        help="Frames to capture for background calibration (default 60 ~= 2s)")
+    parser.add_argument("--mask-only", action="store_true",
+                        help="Show just the heatmap (no original-frame blend)")
+    args = parser.parse_args()
+
+    cap = cv2.VideoCapture(args.camera)
     if not cap.isOpened():
-        raise SystemExit(f"Could not open camera {camera_index}")
+        raise SystemExit(f"Could not open camera {args.camera}")
 
+    # Warm up auto-exposure / white balance
+    for _ in range(15):
+        cap.read()
+
+    window_name = f"STEAM IC live demo — saliency = {args.saliency}"
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+
+    background = calibrate_background(cap, args.bg_samples, window_name)
+    if background is None:
+        cap.release()
+        cv2.destroyAllWindows()
+        return 0
+
+    # Same components the codec uses. We share the BgFgCodec instance only for
+    # its `_motion_mask` helper (so the formula stays in lockstep with the
+    # codec). The standalone SaliencyEstimator is the one we actually call.
+    saliency = SaliencyEstimator(backend=args.saliency)
+    motion_helper = BgFgCodec(BgFgConfig(saliency_backend=args.saliency))
+    smoother = TemporalSmoother(window=SMOOTH_WINDOW)
     gate = FootageGate(threshold=0.35, enable_person=False)
-    saliency = SaliencyEstimator(backend="spectral")
-    smoother = TemporalSmoother(window=5)
+
+    # Resize background to the camera's frame size if they differ
+    ok, probe = cap.read()
+    if ok and background.shape[:2] != probe.shape[:2]:
+        background = cv2.resize(background, (probe.shape[1], probe.shape[0]))
+
+    print("Live demo running. Press 'q' to quit, 'r' to recalibrate, 's' to snap.")
+    last_log = time.time()
+    fps_acc = 0
+    fps_disp = 0.0
 
     while True:
         ok, frame = cap.read()
         if not ok:
             break
 
+        # === The actual codec saliency pipeline ===
+        sal_raw = saliency.predict(frame)
+        if background is not None:
+            motion = motion_helper._motion_mask(frame, background)
+            sal_raw = np.maximum(sal_raw, motion)
+        sal_s = smoother.smooth(sal_raw)
+        alpha = _build_alpha(sal_s, mode="sigmoid",
+                             threshold=MASK_THRESHOLD, steepness=MASK_STEEPNESS)
+        alpha = np.maximum(alpha, MASK_FLOOR)
+
+        # JET overlay (same weights as compare_clip)
+        alpha_u8 = (np.clip(alpha, 0, 1) * 255).astype(np.uint8)
+        heat = cv2.applyColorMap(alpha_u8, cv2.COLORMAP_JET)
+        if args.mask_only:
+            display = heat
+        else:
+            display = cv2.addWeighted(frame, OVERLAY_FRAME_W, heat, OVERLAY_HEAT_W, 0.0)
+
+        # === HUD ===
         score = gate.step(frame)
-        sal = saliency.predict(frame)
-        sal_s = smoother.smooth(sal)
-
-        # Render heatmap overlay
-        heat = (sal_s * 255).astype(np.uint8)
-        heat_color = cv2.applyColorMap(heat, cv2.COLORMAP_JET)
-        blended = cv2.addWeighted(frame, 0.6, heat_color, 0.4, 0.0)
-
-        # HUD text
-        color = (0, 255, 0) if score.triggered else (120, 120, 120)
+        color = (0, 220, 0) if score.triggered else (130, 130, 130)
         status = "RECORDING" if score.triggered else "idle"
-        cv2.putText(blended, f"{status}  useful={score.usefulness:.2f}",
-                    (12, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
-        cv2.putText(blended, f"motion={score.motion:.2f}  flow={score.flow_magnitude:.1f}",
-                    (12, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (230, 230, 230), 1)
+        cv2.putText(display, f"{status}   useful={score.usefulness:.2f}",
+                    (12, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 2)
+        cv2.putText(display, f"saliency={args.saliency}   smoother={SMOOTH_WINDOW}f",
+                    (12, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (230, 230, 230), 1)
+        cv2.putText(display, f"motion={score.motion:.2f}  flow={score.flow_magnitude:.1f}  fps={fps_disp:.1f}",
+                    (12, 82), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+        cv2.putText(display, "q quit  /  r recalibrate  /  s snap",
+                    (12, display.shape[0] - 12),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
-        cv2.imshow("STEAM IC live demo", blended)
-        if (cv2.waitKey(1) & 0xFF) == ord("q"):
+        cv2.imshow(window_name, display)
+
+        # FPS tracker
+        fps_acc += 1
+        now = time.time()
+        if now - last_log >= 1.0:
+            fps_disp = fps_acc / (now - last_log)
+            fps_acc = 0
+            last_log = now
+
+        # === Key handling ===
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord("q"):
             break
+        if key == ord("r"):
+            background = calibrate_background(cap, args.bg_samples, window_name)
+            if background is None:
+                break
+            if background.shape[:2] != frame.shape[:2]:
+                background = cv2.resize(background, (frame.shape[1], frame.shape[0]))
+            smoother = TemporalSmoother(window=SMOOTH_WINDOW)   # reset history
+        if key == ord("s"):
+            SNAP_PATH.parent.mkdir(parents=True, exist_ok=True)
+            cv2.imwrite(str(SNAP_PATH), display)
+            print(f"Saved snap to {SNAP_PATH}")
 
     cap.release()
     cv2.destroyAllWindows()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
