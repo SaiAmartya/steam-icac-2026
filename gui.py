@@ -398,11 +398,20 @@ class DemoConsole:
 
         Streams stdout+stderr line-by-line into the log queue. Returns the
         exit code. Sets self.current_proc so the Stop button can kill it.
+
+        Force-unbuffers any Python child process — without this, Python
+        detects its stdout is a pipe (not a TTY) and switches to ~4KB
+        block buffering, which means short status lines sit in a buffer
+        for minutes before the GUI ever sees them.
         """
         self._log_q(f"$ {' '.join(shlex.quote(c) for c in cmd)}", tag="cmd")
+
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+
         try:
             self.current_proc = subprocess.Popen(
-                cmd, cwd=str(cwd),
+                cmd, cwd=str(cwd), env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, bufsize=1,
             )
@@ -446,7 +455,7 @@ class DemoConsole:
             messagebox.showerror("Missing script", f"Could not find {script}")
             return
         cmd = [
-            sys.executable, str(script),
+            sys.executable, "-u", str(script),
             "--camera",     str(self.live_camera.get()),
             "--saliency",   self.live_saliency.get(),
             "--bg-samples", str(self.live_bg_samples.get()),
@@ -457,8 +466,10 @@ class DemoConsole:
         # Fire-and-forget — live_demo manages its own OpenCV window.
         self._log_q("Launching live demo window…", tag="dim")
         self._log_q(f"$ {' '.join(shlex.quote(c) for c in cmd)}", tag="cmd")
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
         try:
-            subprocess.Popen(cmd, cwd=str(ROOT))
+            subprocess.Popen(cmd, cwd=str(ROOT), env=env)
         except Exception as e:
             self._log_q(f"[error] {e}", tag="err")
 
@@ -536,7 +547,7 @@ class DemoConsole:
                 self._log_q("", )
                 self._log_q(f"[2/3] Running ablation_bgfg.py …", tag="dim")
                 cmd = [
-                    sys.executable, str(ROOT / "scripts" / "ablation_bgfg.py"),
+                    sys.executable, "-u", str(ROOT / "scripts" / "ablation_bgfg.py"),
                     "--clips",    clip_id,
                     "--crfs",     crf,
                     "--saliency", saliency,
@@ -556,7 +567,7 @@ class DemoConsole:
                 self._log_q("", )
                 self._log_q(f"[3/3] Building 2-row comparison grid (--internals) …", tag="dim")
                 cmd = [
-                    sys.executable, str(ROOT / "scripts" / "compare_clip.py"),
+                    sys.executable, "-u", str(ROOT / "scripts" / "compare_clip.py"),
                     "--clip",        clip_id,
                     "--crf",         crf,
                     "--internals",

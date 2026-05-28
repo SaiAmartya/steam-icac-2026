@@ -31,6 +31,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Optional
@@ -106,6 +107,7 @@ def _sample_frame_indices(n_total: int, k: int) -> list[int]:
 
 def compute_background_median(input_path: str, n_samples: int = 30, blur_sigma: float = 0.0) -> np.ndarray:
     """Per-pixel temporal median over evenly-spaced frames. Returns HxWx3 uint8 BGR."""
+    print(f"  [bg] sampling {n_samples} frames for static background median...", flush=True)
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open {input_path}")
@@ -123,12 +125,14 @@ def compute_background_median(input_path: str, n_samples: int = 30, blur_sigma: 
     if not stack:
         raise RuntimeError(f"No frames read from {input_path}")
 
+    print(f"  [bg] computing per-pixel median over {len(stack)} samples...", flush=True)
     arr = np.stack(stack, axis=0)  # NxHxWx3 uint8
     # median over the time axis; uint8 promoted via np to avoid overflow
     bg = np.median(arr, axis=0).astype(np.uint8)
     if blur_sigma and blur_sigma > 0:
         k = max(3, int(blur_sigma * 6) | 1)  # odd kernel
         bg = cv2.GaussianBlur(bg, (k, k), blur_sigma)
+    print(f"  [bg] static background ready ({bg.shape[1]}x{bg.shape[0]})", flush=True)
     return bg
 
 
@@ -190,6 +194,12 @@ def build_rolling_backgrounds(
     th = max(2, int(src_h * scale)) & ~1
 
     # Pass 1: collect (timestamp_s, thumb)
+    print(
+        f"  [bg-rolling] pass 1/2: walking {n_total} frames, sampling every "
+        f"{stride_frames} ({sample_stride_s:.1f}s) → thumb {tw}x{th}...",
+        flush=True,
+    )
+    progress_every = max(1, n_total // 10) if n_total > 0 else 200
     samples: list[tuple[float, np.ndarray]] = []
     idx = 0
     while True:
@@ -199,15 +209,24 @@ def build_rolling_backgrounds(
         if idx % stride_frames == 0:
             samples.append((idx / fps, cv2.resize(frame, (tw, th))))
         idx += 1
+        if n_total > 0 and idx % progress_every == 0:
+            print(f"    walked {idx}/{n_total} frames  ({len(samples)} samples buffered)", flush=True)
     cap.release()
     if not samples:
         raise RuntimeError(f"No samples collected from {input_path}")
+    print(f"  [bg-rolling] pass 1 done: {len(samples)} sample thumbs collected", flush=True)
 
     total_duration_s = (n_total / fps) if n_total > 0 else (samples[-1][0] + sample_stride_s)
     n_segments = max(1, int(np.ceil(total_duration_s / recalibration_interval_s)))
     half_window = rolling_window_s / 2.0
+    print(
+        f"  [bg-rolling] pass 2/2: building {n_segments} per-segment medians "
+        f"(every {recalibration_interval_s:.1f}s, ±{half_window:.1f}s window)...",
+        flush=True,
+    )
 
     schedule: list[tuple[int, int, np.ndarray]] = []
+    seg_progress_every = max(1, n_segments // 10)
     for i in range(n_segments):
         seg_start_s = i * recalibration_interval_s
         seg_end_s = (i + 1) * recalibration_interval_s
@@ -225,11 +244,15 @@ def build_rolling_backgrounds(
         seg_start_frame = max(0, int(round(seg_start_s * fps)))
         seg_end_frame = int(round(seg_end_s * fps)) if i < n_segments - 1 else n_total
         schedule.append((seg_start_frame, seg_end_frame, bg_full))
+        if (i + 1) % seg_progress_every == 0 or (i + 1) == n_segments:
+            print(f"    built segment {i+1}/{n_segments}  "
+                  f"(t={seg_start_s:.1f}-{seg_end_s:.1f}s, "
+                  f"{len(window_thumbs)} thumbs in window)", flush=True)
 
-    logger.info(
-        f"build_rolling_backgrounds: {len(schedule)} segments "
-        f"(every {recalibration_interval_s:.1f}s, ±{half_window:.1f}s median window, "
-        f"thumbs {tw}x{th}, {len(samples)} samples total)"
+    print(
+        f"  [bg-rolling] schedule ready: {len(schedule)} segments × "
+        f"{src_w}x{src_h}  (sidecar will be a 1-fps mp4 of these)",
+        flush=True,
     )
     return schedule
 
@@ -310,11 +333,24 @@ class BgFgCodec:
             raise RuntimeError(f"Cannot open {input_path}")
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        n_total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
 
         # If we got a single static bg, resize once up front. The rolling
         # schedule's backgrounds are already at source resolution.
         if isinstance(bg_source, np.ndarray) and bg_source.shape[:2] != (h, w):
             bg_source = cv2.resize(bg_source, (w, h))
+
+        # Aim for ~20 progress lines across the whole encode so the GUI log
+        # streams visibly without spamming. Floor at 30 frames so very short
+        # clips still tick at least a few times.
+        progress_every = max(30, n_total // 20) if n_total > 0 else 60
+        print(
+            f"  [encode] streaming {n_total} frames @ {fps:.2f} fps through "
+            f"saliency + bg/fg blend → libx265 ...",
+            flush=True,
+        )
+        t_start = time.time()
 
         self.smoother.reset()
         frame_idx = 0
@@ -333,7 +369,25 @@ class BgFgCodec:
             sal = self.smoother.smooth(sal_raw)
             yield self._blend_frame(frame, bg, sal)
             frame_idx += 1
+            if frame_idx % progress_every == 0:
+                elapsed = time.time() - t_start
+                cur_fps = frame_idx / max(elapsed, 1e-6)
+                eta = (n_total - frame_idx) / max(cur_fps, 1e-6) if n_total else 0
+                pct = (100.0 * frame_idx / n_total) if n_total else 0
+                print(
+                    f"    encoded {frame_idx}/{n_total} frames  "
+                    f"({pct:5.1f}%, {cur_fps:5.1f} fps, ETA {eta:5.1f}s)",
+                    flush=True,
+                )
+
         cap.release()
+        elapsed = time.time() - t_start
+        cur_fps = frame_idx / max(elapsed, 1e-6)
+        print(
+            f"  [encode] done — {frame_idx} frames in {elapsed:.1f}s "
+            f"({cur_fps:.1f} fps avg)",
+            flush=True,
+        )
 
     # ---------- Public encode ----------
 
@@ -362,10 +416,11 @@ class BgFgCodec:
 
         # Build background(s) according to mode.
         if self.cfg.bg_mode == "rolling":
-            logger.info(
-                f"BgFgCodec: rolling backgrounds — recalibrate every "
+            print(
+                f"  [BgFgCodec] mode=rolling, recalibrate every "
                 f"{self.cfg.bg_recalibration_interval_s:.1f}s, ±"
-                f"{self.cfg.bg_rolling_window_s/2:.1f}s median window..."
+                f"{self.cfg.bg_rolling_window_s/2:.1f}s median window",
+                flush=True,
             )
             bg_source = build_rolling_backgrounds(
                 input_path,
@@ -386,7 +441,11 @@ class BgFgCodec:
             )
             n_segments = len(bg_source)
         elif self.cfg.bg_mode == "static":
-            logger.info(f"BgFgCodec: building static background from {self.cfg.bg_sample_count} samples...")
+            print(
+                f"  [BgFgCodec] mode=static, single clip-wide median of "
+                f"{self.cfg.bg_sample_count} samples",
+                flush=True,
+            )
             bg_source = compute_background_median(
                 input_path,
                 n_samples=self.cfg.bg_sample_count,
@@ -398,7 +457,7 @@ class BgFgCodec:
         else:
             raise ValueError(f"Unknown bg_mode: {self.cfg.bg_mode!r}. Use 'static' or 'rolling'.")
 
-        logger.info(f"BgFgCodec: encoding stabilised stream to {output_path}")
+        print(f"  [BgFgCodec] encoding stabilised stream → {output_path}", flush=True)
         stats = self._encoder.encode(
             self._stabilised_iter(input_path, bg_source),
             output_path, fps=fps, size=(w, h),

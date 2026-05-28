@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import logging
 import os
 import sys
 import time
@@ -129,6 +130,12 @@ def discover_clips() -> list[str]:
 
 
 def main():
+    # Surface library logger.info messages (e.g. YoloSaliency device line) so
+    # the user sees them in the console / GUI log without per-script setup.
+    # `force=True` so we override any prior basicConfig and ensure handlers
+    # are attached even if logging was touched on import.
+    logging.basicConfig(level=logging.INFO, format="%(message)s", force=True)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--clips", nargs="*", default=None,
                         help="Specific clip IDs (e.g. clip_04 clip_08). Default: all 20.")
@@ -185,22 +192,31 @@ def main():
 
                 # --- baseline ---
                 base_path = str(ENCODED_DIR / f"baseline_crf{crf}_{clip_id}.mp4")
+                print(f"\n  ── {clip_id} crf{crf} ── encoding baseline H.265 ...", flush=True)
                 enc = encode_baseline(input_path, base_path, crf)
+                print(f"     baseline encoded: {enc['bytes']/1024:.1f} KB. "
+                      f"Sampling metrics (every={args.every}) ...", flush=True)
                 m = sample_metrics(input_path, base_path, sal_for_metrics, every=args.every)
                 row = {"clip": clip_id, "config": "baseline_h265", "crf": crf, **enc, **m}
                 rows.append(row); f_rows.write(json.dumps(row) + "\n"); f_rows.flush()
                 n_done += 1
                 print(f"  [{n_done}/{n_total}] {clip_id} crf{crf} baseline   "
-                      f"{enc['bytes']/1024:7.1f} KB  sal-PSNR {m['sal_psnr_mean']:.2f} dB")
+                      f"{enc['bytes']/1024:7.1f} KB  sal-PSNR {m['sal_psnr_mean']:.2f} dB",
+                      flush=True)
 
                 # --- ours_bgfg ---
                 bgfg_path = str(ENCODED_DIR / f"ours_bgfg_crf{crf}_{clip_id}.mp4")
+                print(f"\n  ── {clip_id} crf{crf} ── encoding ours_bgfg "
+                      f"(bg_mode={args.bg_mode}) ...", flush=True)
                 enc = encode_ours_bgfg(
                     input_path, bgfg_path, crf, args.saliency, None,
                     bg_mode=args.bg_mode,
                     bg_recal_interval_s=args.bg_recal_interval,
                     bg_window_s=args.bg_window,
                 )
+                print(f"     ours_bgfg encoded: {enc['bytes']/1024:.1f} KB "
+                      f"(+ {enc['background_bytes']/1024:.1f} KB sidecar). "
+                      f"Sampling metrics (every={args.every}) ...", flush=True)
                 m = sample_metrics(input_path, bgfg_path, sal_for_metrics, every=args.every)
                 row = {"clip": clip_id, "config": "ours_bgfg", "crf": crf,
                        "bg_mode": args.bg_mode, **enc, **m}
@@ -210,7 +226,8 @@ def main():
                           if args.bg_mode == "rolling" else "")
                 print(f"  [{n_done}/{n_total}] {clip_id} crf{crf} bgfg       "
                       f"{enc['bytes']/1024:7.1f} KB  sal-PSNR {m['sal_psnr_mean']:.2f} dB"
-                      f"  +bg_sidecar {enc['background_bytes']/1024:.1f} KB{bg_tag}")
+                      f"  +bg_sidecar {enc['background_bytes']/1024:.1f} KB{bg_tag}",
+                      flush=True)
 
     # Summary aggregations
     summary = aggregate(rows)
