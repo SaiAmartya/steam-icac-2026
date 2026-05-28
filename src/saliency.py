@@ -140,54 +140,6 @@ class YoloSaliency:
         return "cpu"
 
 
-def describe_device(device: str = "auto", saliency_backend: str = "yolo+spectral") -> dict:
-    """Resolve a device string and describe it in human-readable form.
-
-    Returns a dict with:
-      - resolved     : 'mps' | 'cuda' | 'cuda:0' | 'cpu' (concrete device YOLO will use)
-      - accelerated  : True iff the resolved device is GPU-class (mps/cuda)
-      - yolo_in_use  : True iff the chosen saliency backend will actually call YOLO
-      - label        : human-readable string ("MPS (Apple Silicon GPU via Metal)",
-                       "CUDA: NVIDIA RTX 4090", "CPU (no GPU available)")
-      - banner       : a one-liner ready to print
-
-    The label is honest about the backend choice: if the user picked a CPU-only
-    saliency backend (spectral / finegrained), `yolo_in_use=False` and the
-    banner says so — no point implying GPU use when there's no neural inference.
-    """
-    resolved = YoloSaliency._resolve_device(device)
-    accelerated = resolved.startswith("mps") or resolved.startswith("cuda")
-    yolo_in_use = "yolo" in saliency_backend
-
-    if resolved.startswith("mps"):
-        label = "MPS (Apple Silicon GPU via Metal)"
-    elif resolved.startswith("cuda"):
-        try:
-            import torch
-            name = torch.cuda.get_device_name(0)
-            label = f"CUDA — {name}"
-        except Exception:
-            label = f"CUDA ({resolved})"
-    else:
-        label = "CPU (no GPU accelerator available or selected)"
-
-    if not yolo_in_use:
-        banner = (f"hardware accel   : N/A — saliency backend {saliency_backend!r} "
-                  f"runs on CPU (no neural inference)")
-    elif accelerated:
-        banner = f"hardware accel   : {label}  [YOLO accelerated]"
-    else:
-        banner = (f"hardware accel   : {label}  "
-                  f"[WARNING — YOLO running on CPU, expect ~5-10× slowdown]")
-
-    return {
-        "resolved": resolved,
-        "accelerated": accelerated,
-        "yolo_in_use": yolo_in_use,
-        "label": label,
-        "banner": banner,
-    }
-
     def _load(self) -> bool:
         if self._load_attempted:
             return self._available
@@ -294,6 +246,55 @@ def describe_device(device: str = "auto", saliency_backend: str = "yolo+spectral
         sal = np.maximum(sal, self.fallback_floor)
         self._last_map = sal
         return sal.copy()
+
+
+def describe_device(device: str = "auto", saliency_backend: str = "yolo+spectral") -> dict:
+    """Resolve a device string and describe it in human-readable form.
+
+    Returns a dict with:
+      - resolved     : 'mps' | 'cuda' | 'cuda:0' | 'cpu' (concrete device YOLO will use)
+      - accelerated  : True iff the resolved device is GPU-class (mps/cuda)
+      - yolo_in_use  : True iff the chosen saliency backend will actually call YOLO
+      - label        : human-readable string ("MPS (Apple Silicon GPU via Metal)",
+                       "CUDA: NVIDIA RTX 4090", "CPU (no GPU available)")
+      - banner       : a one-liner ready to print
+
+    The label is honest about the backend choice: if the user picked a CPU-only
+    saliency backend (spectral / finegrained), `yolo_in_use=False` and the
+    banner says so — no point implying GPU use when there's no neural inference.
+    """
+    resolved = YoloSaliency._resolve_device(device)
+    accelerated = resolved.startswith("mps") or resolved.startswith("cuda")
+    yolo_in_use = "yolo" in saliency_backend
+
+    if resolved.startswith("mps"):
+        label = "MPS (Apple Silicon GPU via Metal)"
+    elif resolved.startswith("cuda"):
+        try:
+            import torch
+            name = torch.cuda.get_device_name(0)
+            label = f"CUDA — {name}"
+        except Exception:
+            label = f"CUDA ({resolved})"
+    else:
+        label = "CPU (no GPU accelerator available or selected)"
+
+    if not yolo_in_use:
+        banner = (f"hardware accel   : N/A — saliency backend {saliency_backend!r} "
+                  f"runs on CPU (no neural inference)")
+    elif accelerated:
+        banner = f"hardware accel   : {label}  [YOLO accelerated]"
+    else:
+        banner = (f"hardware accel   : {label}  "
+                  f"[WARNING — YOLO running on CPU, expect ~5-10× slowdown]")
+
+    return {
+        "resolved": resolved,
+        "accelerated": accelerated,
+        "yolo_in_use": yolo_in_use,
+        "label": label,
+        "banner": banner,
+    }
 
 
 class SaliencyEstimator:
