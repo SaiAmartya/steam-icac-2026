@@ -31,15 +31,22 @@ The output is a standards-compliant H.265 mp4. Any decoder plays it back without
 
 ## Headline numbers
 
-Measured on 20 stratified real CCTV clips (Kaggle CCTV Action-Recognition dataset, 13 action classes) plus a 1080p VIRAT outdoor clip.
+The clip we ship in the Pi demo: **VIRAT_S_000003**, 75 s of stationary 1080p surveillance footage (~158 MB raw).
+
+| Setting | Baseline H.265 | Ours bgfg | Saved |
+|---|---|---|---|
+| VIRAT_S_000003 @ CRF 22 | 33.9 MB | **6.5 MB** | **81%** |
+
+Sal-PSNR (saliency-weighted PSNR, error counted only inside the regions we promised to keep): **34.76 dB** for ours vs **37.44 dB** for the baseline — a 2.7 dB drop on the salient pixels, in exchange for an 81% file-size reduction. To the eye, the subject quality is indistinguishable on a side-by-side playback (see `pi_demo/clip_virat_crf22.mp4`).
+
+For broader context, the 20-clip aggregate over the Kaggle CCTV Action-Recognition dataset (13 action classes, 640×360 clips):
 
 | Setting | Baseline H.265 | Ours bgfg | Saved |
 |---|---|---|---|
 | 20-clip aggregate @ CRF 22 | 256.4 KB | 213.4 KB | **17%** |
 | 20-clip aggregate @ CRF 28 | 134.2 KB | 118.4 KB | **12%** |
-| VIRAT 1080p outdoor @ CRF 22 | 3149.8 KB | 1675.9 KB | **47%** |
 
-Subjects remain fully visible in every clip in the catalog. The honest framing: the per-clip win scales with how much of the frame is static background, so the codec gets *better* as cameras move to higher resolution and wider angles — the direction surveillance is already going. See [`docs/architecture.md`](docs/architecture.md) for the why and [`docs/demo_scripts.md`](docs/demo_scripts.md) for how to reproduce.
+The per-clip win scales with how much of the frame is static background, so the codec gets *better* as cameras move to higher resolution and wider angles — the direction surveillance is already going. The VIRAT 1080p clip is the clearest demonstration of that scaling. See [`docs/architecture.md`](docs/architecture.md) for the why and [`docs/demo_scripts.md`](docs/demo_scripts.md) for how to reproduce.
 
 ---
 
@@ -59,7 +66,7 @@ The three demos worth running first:
 python scripts/live_demo.py
 
 # 2. Webcam → 4-panel compressed comparison
-python scripts/photo_demo.py --codec bgfg --duration 5 --saliency yolo+spectral --show
+python scripts/photo_demo.py --duration 5 --saliency yolo+spectral --show
 
 # 3. Apples-to-apples on any mp4 (VIRAT clip, your own footage, etc.)
 python scripts/bench_external.py --input path/to/clip.mp4 --saliency yolo+spectral --show
@@ -95,27 +102,30 @@ steam-icac-2026/
 │   ├── saliency.py                 YOLO+spectral+motion saliency backends
 │   ├── gate.py                     Useful-footage gate (motion + flow + YOLO)
 │   ├── bg_fg_codec.py              ← The headline innovation: bg/fg decomposition codec
-│   ├── compress.py                 Saliency-aware blur+H.265 pipeline (prior approach)
-│   ├── pipeline.py                 End-to-end orchestrator for the prior approach
+│   ├── compress.py                 FramePipeEncoder (raw frames → H.265), encode_uniform (baseline), _build_alpha (mask shaping)
 │   ├── neural_codec.py             Tiny autoencoder (the naïve learned-codec baseline)
 │   └── metrics.py                  PSNR / SSIM / LPIPS / saliency-weighted PSNR
 │
-└── scripts/
-    ├── live_demo.py                Real-time webcam saliency heatmap window
-    ├── photo_demo.py               Webcam capture → 4-panel comparison PNG
-    ├── compare_clip.py             Build a side-by-side video for any clip
-    ├── saliency_video.py           Render a saliency-overlay video for any clip
-    ├── bench_external.py           Run the codec on any mp4 (VIRAT, Pexels, etc.)
-    ├── ablation_bgfg.py            Three-way comparison across all 20 clips × 3 CRFs
-    ├── qualitative_catalog_v2.py   Build the multi-page comparison PDF
-    ├── simulate_hour.py            Synth long-form footage for the hour-long argument
-    ├── run_pipeline.py             CLI for the prior sigmoid pipeline
-    ├── train_autoencoder.py        Trains the neural-codec baseline
-    ├── make_test_video.py          Synthetic test clip generator
-    └── (older ablation scripts: ablation_real.py, ablation_mask_modes.py, etc.)
+├── scripts/
+│   ├── live_demo.py                Real-time webcam saliency heatmap window
+│   ├── photo_demo.py               Webcam capture → 4-panel comparison PNG
+│   ├── compare_clip.py             Build a side-by-side video for any clip
+│   ├── saliency_video.py           Render a saliency-overlay video for any clip
+│   ├── bench_external.py           Run the codec on any mp4 (VIRAT, Pexels, etc.)
+│   ├── ablation_bgfg.py            Head-to-head comparison across all 20 clips × 3 CRFs
+│   ├── qualitative_catalog_v2.py   Build the multi-page comparison PDF
+│   ├── simulate_hour.py            Synth long-form footage for the hour-long argument
+│   ├── train_autoencoder.py        Trains the neural-codec baseline
+│   ├── make_test_video.py          Synthetic test clip generator
+│   └── (older ablation scripts: ablation_real.py, ablation_mask_modes.py, etc.)
+│
+└── pi_demo/                        Standalone Raspberry Pi playback bundle
+    ├── demo_pi.py                  Replays the pipeline log in ~25s, opens the cached comparison
+    ├── clip_virat_crf22.mp4        Pre-computed 3-panel side-by-side (~168 MB)
+    └── README.md                   Setup + run instructions for the Pi
 ```
 
-Every module exposes a small public API documented in its docstring. `bg_fg_codec.py` is the integration surface for the headline codec; `pipeline.py` is the older sigmoid-blur path we keep as the prior baseline.
+Every module exposes a small public API documented in its docstring. `bg_fg_codec.py` is the integration surface for the headline codec. The previous `ours_sigmoid` pre-blur pipeline (`src/pipeline.py`, `scripts/run_pipeline.py`) was retired in May 2026 — bg/fg dominated it on every measured CRF, so the runnable code was removed. The historical comparison tables in `docs/writeup_updates.md` and `docs/results_summary.md` are frozen and no longer reproducible.
 
 ---
 

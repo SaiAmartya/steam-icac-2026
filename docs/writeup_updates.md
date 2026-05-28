@@ -4,6 +4,13 @@ Two new sections to add to your analysis writeup, plus reframing notes for the
 existing neural-codec section. Numbers reference the bg/fg ablation
 (`results/ablation_bgfg/summary.md`) — re-run after the full sweep to refresh.
 
+> **Frozen historical comparison.** The `ours_sigmoid` rows / claims below
+> correspond to the legacy pre-blur pipeline that was retired in May 2026
+> (`src/pipeline.py`, `scripts/run_pipeline.py`, and the `SaliencyCompressor`
+> class were removed — bg/fg dominated it on every CRF). The numbers stand as
+> the historical justification for the pivot; they cannot be regenerated from
+> the current code without restoring those files from git history.
+
 ---
 
 ## NEW SECTION — Background/foreground decomposition codec

@@ -24,7 +24,7 @@ echo ""
 
 # 2. COMMIT 1 — headline feature: bg/fg codec + saliency + scripts
 echo "=== commit 1: bg/fg codec + saliency upgrades + scripts ==="
-git add src/bg_fg_codec.py src/saliency.py src/pipeline.py
+git add src/bg_fg_codec.py src/saliency.py src/compress.py
 git add scripts/bg_fg_codec_smoke.py 2>/dev/null || true   # optional helper
 git add scripts/ablation_bgfg.py
 git add scripts/compare_clip.py

@@ -73,7 +73,7 @@ rm -rf results/photo_demo
 rm -rf results/comparisons
 rm -rf results/simulate_hour
 rm -rf results/saliency_videos
-# Root-level outputs from the old sigmoid pipeline
+# Root-level outputs from the old sigmoid pipeline (pipeline itself retired May 2026)
 rm -f results/baseline_uniform.mp4
 rm -f results/ours_saliency.mp4
 rm -f results/events.json

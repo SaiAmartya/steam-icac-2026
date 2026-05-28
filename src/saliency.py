@@ -82,6 +82,7 @@ class YoloSaliency:
         infer_every: int = 1,
         fallback_floor: float = 0.05,
         strict: bool = True,
+        device: str = "auto",
     ) -> None:
         """
         Args:
@@ -97,6 +98,11 @@ class YoloSaliency:
             strict: If True (default), raise RuntimeError if YOLO cannot load.
                     Set False only if you actively want the silent flat-map
                     fallback — usually you don't.
+            device: Inference device for YOLO. "auto" (default) picks MPS on
+                    Apple Silicon, CUDA if available, else CPU. Pass an explicit
+                    string ("mps", "cuda", "cpu", "cuda:0") to override.
+                    Ultralytics does NOT auto-select MPS — passing "auto" here
+                    is the difference between ~5 fps and ~30 fps on M-series.
         """
         self.weights = weights
         self.classes = set(classes) if classes is not None else None
@@ -105,6 +111,7 @@ class YoloSaliency:
         self.infer_every = max(1, int(infer_every))
         self.fallback_floor = fallback_floor
         self.strict = strict
+        self.device = self._resolve_device(device)
 
         self._model = None
         self._load_attempted = False
@@ -117,6 +124,21 @@ class YoloSaliency:
         if self.strict:
             self._load()
 
+    @staticmethod
+    def _resolve_device(device: str) -> str:
+        """Resolve 'auto' to a concrete device string."""
+        if device != "auto":
+            return device
+        try:
+            import torch
+            if torch.backends.mps.is_available():
+                return "mps"
+            if torch.cuda.is_available():
+                return "cuda"
+        except Exception:
+            pass
+        return "cpu"
+
     def _load(self) -> bool:
         if self._load_attempted:
             return self._available
@@ -124,8 +146,19 @@ class YoloSaliency:
         try:
             from ultralytics import YOLO
             self._model = YOLO(self.weights)
+            # Move model weights onto the resolved device once at load time so
+            # every subsequent predict() doesn't re-pay the device-transfer cost.
+            try:
+                self._model.to(self.device)
+            except Exception as e:
+                logger.warning(
+                    f"YoloSaliency: could not move model to device "
+                    f"{self.device!r} ({e}); inference will pick its own."
+                )
             self._available = True
-            logger.info(f"YoloSaliency: loaded {self.weights}")
+            logger.info(
+                f"YoloSaliency: loaded {self.weights} on device={self.device!r}"
+            )
         except ImportError as e:
             msg = (
                 f"YoloSaliency: ultralytics is not installed in this Python "
@@ -175,7 +208,10 @@ class YoloSaliency:
 
         try:
             results = self._model.predict(
-                frame_bgr, verbose=False, conf=self.conf_threshold
+                frame_bgr,
+                verbose=False,
+                conf=self.conf_threshold,
+                device=self.device,
             )
         except Exception as e:
             logger.debug(f"YoloSaliency: inference error {e}; using flat map")

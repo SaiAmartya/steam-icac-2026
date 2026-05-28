@@ -1,11 +1,11 @@
 """
 Side-by-side full-video comparison for a single clip.
 
-Produces ONE playable mp4 with up to 4 panels stacked horizontally:
+Produces ONE playable mp4 with up to 3 panels stacked horizontally:
     original | saliency overlay | baseline H.265 | ours_bgfg
 
 Best for live demos and slide reveals — judges can play the file in QuickTime
-and watch all four versions in lockstep.
+and watch all versions in lockstep.
 
 Usage:
     python scripts/compare_clip.py --clip clip_14 --crf 22
@@ -93,11 +93,7 @@ def main() -> None:
     parser.add_argument("--saliency", default="yolo+spectral",
                         choices=["spectral", "finegrained", "yolo", "yolo+spectral"])
     parser.add_argument("--no-saliency", action="store_true",
-                        help="Drop the saliency-overlay panel (3-panel output)")
-    parser.add_argument("--no-sigmoid", action="store_true", default=True,
-                        help="Drop the ours_sigmoid panel (default: dropped)")
-    parser.add_argument("--include-sigmoid", dest="no_sigmoid", action="store_false",
-                        help="Include the ours_sigmoid panel (off by default)")
+                        help="Drop the saliency-overlay panel (2-panel output: original | baseline | bgfg becomes original | baseline | bgfg without overlay)")
     parser.add_argument("--out", type=Path, default=None,
                         help="Output mp4 path (default: results/comparisons/<clip>_crf<N>.mp4)")
     parser.add_argument("--show", action="store_true",
@@ -106,7 +102,6 @@ def main() -> None:
 
     orig_path = DATA / f"{args.clip}.mp4"
     base_path = ENCODED / f"baseline_crf{args.crf}_{args.clip}.mp4"
-    sig_path = ENCODED / f"ours_sigmoid_crf{args.crf}_{args.clip}.mp4"
     bgfg_path = ENCODED / f"ours_bgfg_crf{args.crf}_{args.clip}.mp4"
 
     for p in (orig_path, base_path, bgfg_path):
@@ -134,8 +129,6 @@ def main() -> None:
     caps = {"original": cv2.VideoCapture(str(orig_path)),
             "baseline": cv2.VideoCapture(str(base_path)),
             "bgfg":     cv2.VideoCapture(str(bgfg_path))}
-    if not args.no_sigmoid and sig_path.exists():
-        caps["sigmoid"] = cv2.VideoCapture(str(sig_path))
 
     # All inputs are at the source resolution + fps
     fps = caps["original"].get(cv2.CAP_PROP_FPS) or 30.0
@@ -147,8 +140,6 @@ def main() -> None:
     if not args.no_saliency:
         order.append("saliency")
     order.append("baseline")
-    if "sigmoid" in caps:
-        order.append("sigmoid")
     order.append("bgfg")
 
     panel_w, panel_h = src_w, src_h
@@ -156,13 +147,12 @@ def main() -> None:
     out_h = panel_h
 
     # Labels
-    base_kb = kb(base_path); bgfg_kb = kb(bgfg_path); sig_kb = kb(sig_path)
+    base_kb = kb(base_path); bgfg_kb = kb(bgfg_path)
     pct = lambda k: f"{(1 - k/base_kb)*100:+.0f}%" if base_kb > 0 else "?"
     labels = {
         "original":  ("original",                  f"{kb(orig_path):.0f} KB on disk"),
         "saliency":  ("saliency overlay",          f"{args.saliency} + motion"),
         "baseline":  (f"baseline H.265 (CRF {args.crf})", f"{base_kb:.0f} KB"),
-        "sigmoid":   (f"ours_sigmoid (CRF {args.crf})",  f"{sig_kb:.0f} KB  ({pct(sig_kb)})"),
         "bgfg":      (f"ours_bgfg (CRF {args.crf})",     f"{bgfg_kb:.0f} KB  ({pct(bgfg_kb)})"),
     }
 

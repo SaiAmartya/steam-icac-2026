@@ -1,9 +1,9 @@
 """
 Webcam snap → saliency-aware vs baseline H.265 comparison.
 
-Captures a short burst from the laptop camera, runs it through the project
-pipeline (ours sigmoid vs uniform H.265 baseline at the same CRF), and renders
-the 4-panel comparison PNG: original / saliency overlay / baseline / ours.
+Captures a short burst from the laptop camera, runs it through the bg/fg
+codec vs uniform H.265 baseline at the same CRF, and renders the 4-panel
+comparison PNG: original / saliency overlay / baseline / ours_bgfg.
 
 Usage:
     python scripts/photo_demo.py
@@ -28,11 +28,9 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.pipeline import PipelineConfig, run_pipeline  # noqa: E402
 from src.bg_fg_codec import BgFgCodec, BgFgConfig  # noqa: E402
 from src.compress import encode_uniform  # noqa: E402
-from src.metrics import video_metrics, saliency_weighted_psnr  # noqa: E402
-from src.saliency import SaliencyEstimator  # noqa: E402
+from src.metrics import video_metrics  # noqa: E402
 
 OUT_DIR = ROOT / "results" / "photo_demo"
 
@@ -107,7 +105,6 @@ def kb(path: Path) -> float:
 def render_panel(
     original_path: Path,
     baseline_path: Path,
-    sigmoid_path: Path | None,
     bgfg_path: Path | None,
     crf: int,
     out_png: Path,
@@ -126,12 +123,6 @@ def render_panel(
         (sal, "saliency overlay"),
         (base, f"baseline H.265 (CRF {crf})\n{base_kb:.0f} KB"),
     ]
-    if sigmoid_path is not None and sigmoid_path.exists():
-        s = get_middle_frame(sigmoid_path)
-        if s is not None:
-            sk = kb(sigmoid_path)
-            pct = (1 - sk / base_kb) * 100 if base_kb > 0 else 0
-            panels.append((s, f"ours_sigmoid (CRF {crf})\n{sk:.0f} KB  ({pct:+.0f}%)"))
     if bgfg_path is not None and bgfg_path.exists():
         b = get_middle_frame(bgfg_path)
         if b is not None:
@@ -175,14 +166,9 @@ def main() -> None:
     parser.add_argument("--camera", type=int, default=0, help="Camera index (default 0)")
     parser.add_argument("--duration", type=float, default=2.0, help="Capture seconds (default 2.0)")
     parser.add_argument("--crf", type=int, default=28, help="CRF for both encoders (default 28)")
-    parser.add_argument("--codec", choices=["sigmoid", "bgfg", "both"], default="both",
-                        help="Which 'ours' encoder(s) to compare against baseline")
     parser.add_argument("--saliency", default="yolo+spectral",
                         choices=["spectral", "finegrained", "yolo", "yolo+spectral"],
                         help="Saliency backend (yolo+spectral recommended for surveillance)")
-    parser.add_argument("--gate", type=float, default=0.0,
-                        help="Gate threshold for sigmoid pipeline; 0 = always-on")
-    parser.add_argument("--blur", type=int, default=21)
     parser.add_argument("--keep-tmp", action="store_true", help="Keep the captured source mp4")
     parser.add_argument("--show", action="store_true", help="Open the result PNG when done")
     args = parser.parse_args()
@@ -195,58 +181,38 @@ def main() -> None:
     capture_burst(args.camera, args.duration, src_path)
 
     base_path = OUT_DIR / "baseline_uniform.mp4"
-    sig_path = OUT_DIR / "ours_saliency.mp4"
     bgfg_path = OUT_DIR / "ours_bgfg.mp4"
     out_png = OUT_DIR / "comparison.png"
 
-    # Always make the baseline (uniform H.265 at same CRF)
+    # Baseline (uniform H.265 at the chosen CRF)
     print("\n  encoding baseline H.265...")
     encode_uniform(str(src_path), str(base_path), crf=args.crf)
 
-    sigmoid_metrics = None
-    bgfg_metrics = None
+    # bg/fg codec
+    print("  running bg/fg codec...")
+    cfg = BgFgConfig(
+        saliency_backend=args.saliency,
+        crf=args.crf,
+        mask_mode="sigmoid",
+        mask_threshold=0.30,
+        mask_steepness=12.0,
+        smooth_window=7,
+    )
+    BgFgCodec(cfg).encode(str(src_path), str(bgfg_path))
 
-    if args.codec in ("sigmoid", "both"):
-        print("  running sigmoid pipeline...")
-        cfg = PipelineConfig(
-            gate_threshold=args.gate,
-            saliency_backend=args.saliency,
-            crf=args.crf,
-            baseline_crf=args.crf,
-            blur_strength=args.blur,
-        )
-        sigmoid_metrics = run_pipeline(str(src_path), str(OUT_DIR), cfg=cfg)
-        # run_pipeline writes ours_saliency.mp4 + baseline_uniform.mp4 — we keep our baseline.
-
-    if args.codec in ("bgfg", "both"):
-        print("  running bg/fg codec...")
-        cfg = BgFgConfig(
-            saliency_backend=args.saliency,
-            crf=args.crf,
-            mask_mode="sigmoid",
-            mask_threshold=0.30,
-            mask_steepness=12.0,
-            smooth_window=7,
-        )
-        bgfg_stats = BgFgCodec(cfg).encode(str(src_path), str(bgfg_path))
-        bgfg_metrics = {"stream_bytes": bgfg_stats["bytes"]}
-
-    # Compute sal-PSNR for the honest comparison
-    sal_est = SaliencyEstimator(backend=args.saliency)
+    # Compute full-frame PSNR for the subtitle line (sal-PSNR omitted here for speed)
     extras = []
     base_psnr_full = video_metrics(str(src_path), str(base_path), every=5).get("psnr_mean")
     if base_psnr_full is not None:
         extras.append(f"baseline PSNR {base_psnr_full:.1f} dB")
-    if args.codec in ("bgfg", "both") and bgfg_path.exists():
+    if bgfg_path.exists():
         bgfg_psnr_full = video_metrics(str(src_path), str(bgfg_path), every=5).get("psnr_mean")
         extras.append(f"bgfg PSNR {bgfg_psnr_full:.1f} dB")
     subtitle_extra = " · ".join(extras)
 
     print("\n  rendering comparison panel...")
     render_panel(
-        src_path, base_path,
-        sig_path if args.codec in ("sigmoid", "both") else None,
-        bgfg_path if args.codec in ("bgfg", "both") else None,
+        src_path, base_path, bgfg_path,
         args.crf, out_png, subtitle_extra=subtitle_extra,
     )
 
@@ -257,10 +223,7 @@ def main() -> None:
     print("\n=== RESULT ===")
     print(f"  original (capture) : {kb(src_path):7.1f} KB")
     print(f"  baseline H.265     : {kb(base_path):7.1f} KB")
-    if args.codec in ("sigmoid", "both") and sig_path.exists():
-        sk = kb(sig_path); pct = (1 - sk/kb(base_path))*100 if kb(base_path) > 0 else 0
-        print(f"  ours_sigmoid       : {sk:7.1f} KB   ({pct:+.0f}% vs baseline)")
-    if args.codec in ("bgfg", "both") and bgfg_path.exists():
+    if bgfg_path.exists():
         bk = kb(bgfg_path); pct = (1 - bk/kb(base_path))*100 if kb(base_path) > 0 else 0
         print(f"  ours_bgfg          : {bk:7.1f} KB   ({pct:+.0f}% vs baseline)")
     print(f"\n  comparison         : {out_png}")

@@ -38,4 +38,4 @@ python -c "import cv2, torch, numpy, skimage; print('numpy', numpy.__version__, 
 
 echo
 echo "==> Setup complete. Activate with:  source .venv/bin/activate"
-echo "==> Then:  python scripts/make_test_video.py && python scripts/run_pipeline.py --input data/test.mp4"
+echo "==> Then:  python scripts/make_test_video.py && python scripts/ablation_bgfg.py --quick --saliency yolo+spectral"

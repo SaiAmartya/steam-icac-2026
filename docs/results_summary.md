@@ -4,6 +4,8 @@ This document consolidates every number that goes into the analysis, deck, and p
 
 **Last updated:** 2026-04-30, end of Wave-3 sigmoid-mask validation pass.
 
+> **Frozen — partly no longer reproducible.** The `ours_sigmoid_b21_*` rows below correspond to the legacy pre-blur pipeline that was removed from the codebase in May 2026 (`src/pipeline.py`, `scripts/run_pipeline.py`, and the `SaliencyCompressor` class are gone — bg/fg dominated sigmoid on every CRF). The numbers are preserved as a historical record of the comparison that justified the pivot; they cannot be regenerated from the current code without restoring those files from git history.
+
 ---
 
 ## Test set

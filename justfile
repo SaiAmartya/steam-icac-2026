@@ -16,7 +16,7 @@ setup: check-ffmpeg create-venv install-deps test
     @echo "    Windows:      .venv\\Scripts\\activate"
     @echo "==> Then run:"
     @echo "    python scripts/make_test_video.py"
-    @echo "    python scripts/run_pipeline.py --input data/test.mp4"
+    @echo "    python scripts/ablation_bgfg.py --quick --saliency yolo+spectral"
 
 # Check if ffmpeg is reachable in the system path
 check-ffmpeg:

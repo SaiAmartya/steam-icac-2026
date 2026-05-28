@@ -39,7 +39,7 @@ import cv2
 import numpy as np
 
 from .saliency import SaliencyEstimator, TemporalSmoother
-from .compress import SaliencyCompressor, CompressorConfig, _build_alpha
+from .compress import FramePipeEncoder, H265EncoderConfig, _build_alpha
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ class BgFgConfig:
     bg_sample_count: int = 30           # frames sampled across the clip for median
     bg_blur_sigma: float = 0.0          # post-median Gaussian smoothing (0 = none)
 
-    # Encoder (reuses SaliencyCompressor's H.265 pipeline)
+    # Encoder
     codec: str = "libx265"
     crf: int = 28
     preset: str = "fast"
@@ -129,17 +129,12 @@ class BgFgCodec:
         )
         self.smoother = TemporalSmoother(window=self.cfg.smooth_window)
 
-        compressor_cfg = CompressorConfig(
-            tier="C",
+        encoder_cfg = H265EncoderConfig(
             codec=self.cfg.codec,
             crf=self.cfg.crf,
-            blur_strength=1,            # we don't pre-blur — the bg replacement IS our spatial filter
             preset=self.cfg.preset,
-            mask_mode="alpha",          # not used; we pass already-processed frames
-            mask_threshold=self.cfg.mask_threshold,
-            mask_steepness=self.cfg.mask_steepness,
         )
-        self._compressor = SaliencyCompressor(compressor_cfg)
+        self._encoder = FramePipeEncoder(encoder_cfg)
 
     # ---------- Core preprocessing ----------
 
@@ -235,7 +230,7 @@ class BgFgCodec:
         cv2.imwrite(bg_path, background, [cv2.IMWRITE_PNG_COMPRESSION, 9])
 
         logger.info(f"BgFgCodec: encoding stabilised stream to {output_path}")
-        stats = self._compressor.encode(
+        stats = self._encoder.encode(
             self._stabilised_iter(input_path, background),
             output_path, fps=fps, size=(w, h),
         )

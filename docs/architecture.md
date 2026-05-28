@@ -277,12 +277,13 @@ flowchart TB
 |---|---|
 | `src/saliency.py` | All saliency backends (spectral, finegrained, yolo, yolo+spectral). Temporal smoothing. |
 | `src/gate.py` | Footage gate (motion + flow + person). Decides if recording is worth it. |
-| `src/compress.py` | Saliency-aware blur+H.265 pipeline (`ours_sigmoid`). The previous approach. |
-| `src/bg_fg_codec.py` | The new bg/fg decomposition codec (`ours_bgfg`). Our headline innovation. |
-| `src/pipeline.py` | Wires `ours_sigmoid` end-to-end. Used by run_pipeline.py. |
+| `src/compress.py` | `FramePipeEncoder` (raw BGR frames → H.265), `encode_uniform` (baseline transcode), `_build_alpha` (saliency-mask shaping). |
+| `src/bg_fg_codec.py` | The bg/fg decomposition codec (`ours_bgfg`). Our headline innovation. |
 | `src/metrics.py` | PSNR, SSIM, LPIPS, and **saliency-weighted PSNR** (the honest metric for our codec). |
 | `src/neural_codec.py` | Single-frame autoencoder (the *naive learned-codec baseline* — not competitive). |
-| `scripts/ablation_bgfg.py` | The three-way comparison: baseline / ours_sigmoid / ours_bgfg. |
-| `scripts/qualitative_catalog_v2.py` | 5-panel comparison PDF for showcase example selection. |
-| `scripts/photo_demo.py` | Live webcam demo, all three encoders side by side. |
+| `scripts/ablation_bgfg.py` | Head-to-head comparison: baseline H.265 vs ours_bgfg. |
+| `scripts/qualitative_catalog_v2.py` | 4-panel comparison PDF for showcase example selection. |
+| `scripts/photo_demo.py` | Live webcam demo, baseline vs ours_bgfg side by side. |
 | `docs/writeup_updates.md` | Drop-in sections for analysis.docx. |
+
+> **Note:** the prior `ours_sigmoid` pre-blur pipeline (formerly `src/pipeline.py`, `scripts/run_pipeline.py`, `SaliencyCompressor`) was retired in May 2026 — the bg/fg codec dominates it on every measured CRF, so we removed it from the runnable surface. The historical comparison tables in `docs/writeup_updates.md` and `docs/results_summary.md` are frozen and no longer reproducible from the codebase as-is.

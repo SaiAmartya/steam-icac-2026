@@ -1,10 +1,9 @@
 """
-Background/foreground codec ablation — three-way comparison on every real clip.
+Background/foreground codec ablation — head-to-head against H.265 on every real clip.
 
-For each clip × CRF, encodes the source three ways:
+For each clip × CRF, encodes the source two ways:
   - baseline_h265  : uniform H.265 (the comparison)
-  - ours_sigmoid   : the existing saliency-aware pre-blur pipeline
-  - ours_bgfg      : the new background/foreground decomposition codec
+  - ours_bgfg      : the background/foreground decomposition codec
                      (saliency backend configurable: spectral / yolo / yolo+spectral)
 
 Reports per row:
@@ -47,9 +46,8 @@ from skimage.metrics import peak_signal_noise_ratio as sk_psnr
 from skimage.metrics import structural_similarity as sk_ssim
 
 from src.bg_fg_codec import BgFgCodec, BgFgConfig
-from src.compress import SaliencyCompressor, CompressorConfig, encode_uniform
+from src.compress import encode_uniform
 from src.metrics import saliency_weighted_psnr
-from src.pipeline import PipelineConfig, run_pipeline
 from src.saliency import SaliencyEstimator
 
 OUT_DIR = ROOT / "results" / "ablation_bgfg"
@@ -98,28 +96,6 @@ def encode_baseline(input_path: str, out_path: str, crf: int) -> dict:
     return {"bytes": os.path.getsize(out_path)}
 
 
-def encode_ours_sigmoid(input_path: str, out_dir: Path, crf: int, saliency_backend: str,
-                        saliency_yolo_kwargs: dict | None) -> dict:
-    """Reuse the existing pipeline. It writes ours_saliency.mp4 alongside baseline_uniform.mp4."""
-    cfg = PipelineConfig(
-        gate_threshold=0.0,        # always-on so we process all frames
-        saliency_backend=saliency_backend,
-        saliency_yolo_kwargs=saliency_yolo_kwargs,
-        crf=crf,
-        baseline_crf=crf,
-        mask_mode="sigmoid",
-        mask_threshold=0.4,
-        mask_steepness=12.0,
-        blur_strength=21,
-    )
-    result = run_pipeline(input_path, str(out_dir), cfg=cfg)
-    src = Path(result["ours"]["path"])
-    dst = out_dir / f"ours_sigmoid_crf{crf}_{Path(input_path).stem}.mp4"
-    if src.exists() and src != dst:
-        src.rename(dst)
-    return {"bytes": os.path.getsize(dst), "path": str(dst)}
-
-
 def encode_ours_bgfg(input_path: str, out_path: str, crf: int, saliency_backend: str,
                      saliency_yolo_kwargs: dict | None) -> dict:
     cfg = BgFgConfig(
@@ -149,11 +125,9 @@ def main():
     parser.add_argument("--crfs", type=int, nargs="*", default=[22, 28, 34])
     parser.add_argument("--saliency", default="spectral",
                         choices=["spectral", "finegrained", "yolo", "yolo+spectral"],
-                        help="Saliency backend for ours_sigmoid + ours_bgfg")
+                        help="Saliency backend for ours_bgfg")
     parser.add_argument("--every", type=int, default=15,
                         help="Sample every N frames for metrics (lower = slower, more accurate)")
-    parser.add_argument("--skip-sigmoid", action="store_true",
-                        help="Skip the existing ours_sigmoid pipeline (saves time)")
     parser.add_argument("--quick", action="store_true",
                         help="3 clips × 1 CRF for smoke test")
     args = parser.parse_args()
@@ -170,7 +144,7 @@ def main():
     sal_for_metrics = SaliencyEstimator(backend=args.saliency)
     rows = []
 
-    n_total = len(clips) * len(args.crfs) * (3 if not args.skip_sigmoid else 2)
+    n_total = len(clips) * len(args.crfs) * 2
     n_done = 0
     t0 = time.time()
 
@@ -195,23 +169,6 @@ def main():
                 n_done += 1
                 print(f"  [{n_done}/{n_total}] {clip_id} crf{crf} baseline   "
                       f"{enc['bytes']/1024:7.1f} KB  sal-PSNR {m['sal_psnr_mean']:.2f} dB")
-
-                # --- ours_sigmoid (skip if requested) ---
-                if not args.skip_sigmoid:
-                    try:
-                        enc = encode_ours_sigmoid(
-                            input_path, ENCODED_DIR, crf,
-                            args.saliency, None,
-                        )
-                        m = sample_metrics(input_path, enc["path"], sal_for_metrics, every=args.every)
-                        row = {"clip": clip_id, "config": "ours_sigmoid", "crf": crf,
-                               **{k: v for k, v in enc.items() if k != "path"}, **m}
-                        rows.append(row); f_rows.write(json.dumps(row) + "\n"); f_rows.flush()
-                    except Exception as e:
-                        print(f"    sigmoid failed: {e}")
-                    n_done += 1
-                    print(f"  [{n_done}/{n_total}] {clip_id} crf{crf} sigmoid    "
-                          f"{enc['bytes']/1024:7.1f} KB  sal-PSNR {m['sal_psnr_mean']:.2f} dB")
 
                 # --- ours_bgfg ---
                 bgfg_path = str(ENCODED_DIR / f"ours_bgfg_crf{crf}_{clip_id}.mp4")
@@ -292,8 +249,8 @@ def plot_rd_curve(rows: list[dict], out_png: Path) -> None:
         points.setdefault(key, []).append(r)
 
     fig, ax = plt.subplots(figsize=(7, 5))
-    colors = {"baseline_h265": "#888", "ours_sigmoid": "#1f77b4", "ours_bgfg": "#d62728"}
-    markers = {"baseline_h265": "o", "ours_sigmoid": "s", "ours_bgfg": "^"}
+    colors = {"baseline_h265": "#888", "ours_bgfg": "#d62728"}
+    markers = {"baseline_h265": "o", "ours_bgfg": "^"}
 
     for cfg, rs in points.items():
         # group by CRF
