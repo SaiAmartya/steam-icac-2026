@@ -20,13 +20,10 @@ uploaded.
 flowchart TD
     A([Camera sensor<br/>raw frames]) --> B[Footage gate<br/>motion + flow + person]
     B -->|usefulness < threshold| C[Idle mode<br/>heavy compression / skip]
-    B -->|usefulness ≥ threshold| D[Saliency estimator<br/>YOLO+spectral]
-    D --> E[Temporal smoother<br/>5–7 frame window]
-    E --> F[BgFgCodec encoder<br/>see diagram 2]
+    B -->|usefulness ≥ threshold| F[BgFgCodec encoder<br/>saliency + bg/fg blend + H.265<br/>see diagram 2 for internals]
     F --> G([H.265 mp4<br/>storage or upload])
     C --> G
 
-    style D fill:#e8f4fd,stroke:#3b82f6,color:#0c4a6e
     style F fill:#fde2e2,stroke:#dc2626,color:#7f1d1d
 ```
 
@@ -36,12 +33,14 @@ flowchart TD
   interesting is happening. Uses MOG2 background subtraction (motion), sparse
   optical flow (movement magnitude), and optional YOLOv8n person detection.
   Threshold tunable (default 0.25). Saves enormous power on long idle periods.
-- **Saliency estimator** (`src/saliency.py`): per-frame map showing where the
-  important content is. Backend selectable — see diagram 3.
-- **Temporal smoother**: moving-average over recent saliency maps. Prevents
-  flicker (without this, the saliency map jitters every frame and the codec
-  wastes bits encoding the jitter).
-- **BgFgCodec encoder**: our main innovation. See diagram 2.
+  The gate runs its own motion/flow signals and does **not** consume the
+  codec's saliency map — the two pipelines are independent.
+- **BgFgCodec encoder** (`src/bg_fg_codec.py`): our main innovation. Owns the
+  saliency estimator (`src/saliency.py`, backend selectable — see diagram 3)
+  and the temporal smoother internally; the camera runtime treats it as a
+  single black box that takes raw frames in and emits H.265 bytes out. The
+  per-frame data path (saliency → smoother → sigmoid mask → bg/fg blend →
+  libx265) is broken out in diagram 2.
 - **Idle mode**: when nothing interesting is happening, encode with very
   aggressive compression (or skip entirely). Saves storage + bandwidth.
 
@@ -61,9 +60,13 @@ flowchart TB
     end
 
     subgraph P2[Pass 2 — Saliency-blended foreground]
-        F1[Each frame] --> F2[Compute saliency map]
-        F2 --> F3[Smooth in time]
-        F3 --> F4[Sigmoid-shaped mask]
+        F1[Each frame] --> F2[Saliency map<br/>yolo+spectral]
+        F1 --> FM[Motion mask<br/>&#124;frame − bg&#124;]
+        BG -.shared.-> FM
+        F2 --> FX[Per-pixel max<br/>semantic ∪ motion]
+        FM --> FX
+        FX --> F3[Smooth in time<br/>~7–11 frame window]
+        F3 --> F4[Sigmoid mask<br/>+ floor 0.25]
         BG -.shared.-> F5
         F4 --> F5[Blend:<br/>mask·frame + 1-mask·bg]
         F5 --> F6[Stabilised frame stream]
@@ -84,11 +87,24 @@ flowchart TB
   scene look like" reference. Temporal median is robust to short-lived
   foreground — a person walking through won't pollute the background because
   no pixel stays "non-background" for more than a fraction of the clip.
-- **Saliency + temporal smoothing**: see diagram 3 for backends.
-- **Sigmoid-shaped mask**: converts continuous saliency [0,1] into a soft
-  blending weight. Steep transition centered at `threshold=0.3`, so salient
-  interior is fully preserved, non-salient interior fully replaced, and the
-  boundary is smooth (no visible seams).
+- **Saliency map**: per-frame map of "what to preserve." Backend is
+  selectable — see diagram 3.
+- **Motion mask**: per-pixel `|frame − background|`, thresholded and dilated.
+  Anything that differs from the static background is by definition
+  foreground, so this catches subjects the semantic saliency missed (dark
+  figures on dark backgrounds, low-confidence YOLO detections, etc.).
+- **Per-pixel max (semantic ∪ motion)**: combines the two via `max`, so a
+  pixel is "important" if *either* signal fires. This is the fix for the
+  "person dissolved into the bar" failure mode where YOLO alone went blank.
+- **Temporal smoothing**: moving-average over ~7–11 recent maps. Prevents
+  flicker — without this the mask jitters every frame and the codec wastes
+  bits encoding the jitter.
+- **Sigmoid-shaped mask + floor 0.25**: converts continuous saliency [0,1]
+  into a soft blending weight. Steep transition centered at `threshold=0.3`,
+  so salient interior is fully preserved, non-salient interior fully
+  replaced, and the boundary is smooth (no visible seams). The 0.25 floor is
+  a safety net: even "non-salient" pixels keep a quarter of the original
+  frame, so anything saliency missed never *fully* vanishes.
 - **Blend**: `stabilised = mask·frame + (1−mask)·background`. The salient
   regions keep their original pixels; non-salient regions are replaced with
   the matching background pixel at that exact location.
