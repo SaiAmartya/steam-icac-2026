@@ -23,12 +23,24 @@ Calibration:
     Motion-vs-background requires a "background image" — for a recorded clip
     we take the temporal median of 30 evenly-spaced samples. For a live camera
     we capture N frames at startup (`--bg-samples`, default 60 = ~2s @ 30fps)
-    with you out of frame, then use that as the static background for the
-    session. Press 'r' any time to recalibrate.
+    with you out of frame, then use that as the initial background.
+
+Auto-recalibration:
+    Cameras don't sit still: you move around, lighting drifts, and if the
+    initial calibration captured you in an unusual position (close to the
+    camera, partially blocking the scene), the background image goes stale
+    fast — the motion mask starts firing on huge sections of the room.
+
+    To fix this we maintain a rolling buffer of recent frame thumbnails and
+    rebuild the background every AUTO_RECAL_INTERVAL_S seconds as the
+    per-pixel median of that buffer. Same trick the codec uses on a recorded
+    clip — the median rejects anything moving (subjects appear in different
+    positions across the window, so they don't survive), while static scene
+    geometry passes through unchanged. Disable with --no-auto-recal.
 
 Keys (focus the OpenCV window):
     q   quit
-    r   recalibrate background (step out of frame first)
+    r   manually recalibrate background (step out of frame first)
     s   save the current frame to results/live_demo_snap.png
 
 Usage:
@@ -37,12 +49,14 @@ Usage:
     python scripts/live_demo.py --saliency yolo            # YOLO only, fastest
     python scripts/live_demo.py --bg-samples 90            # 3s calibration
     python scripts/live_demo.py --mask-only                # just the heatmap
+    python scripts/live_demo.py --no-auto-recal            # static bg, manual 'r' only
 """
 from __future__ import annotations
 
 import argparse
 import sys
 import time
+from collections import deque
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -66,6 +80,15 @@ MASK_STEEPNESS      = 12.0
 MASK_FLOOR          = 0.25
 OVERLAY_FRAME_W     = 0.55
 OVERLAY_HEAT_W      = 0.45
+
+# Rolling-median auto-recalibration. Mirrors the codec's compute_background_median()
+# trick but on a sliding window of live frames. Time-based (not frame-count) so it
+# works whether the live FPS is 30 or 7.5 — the buffer accumulates whatever frames
+# arrive in the wall-clock window, the median rejects motion regardless of count.
+AUTO_RECAL_INTERVAL_S   = 4.0     # rebuild background every 4s of wall time
+AUTO_RECAL_MIN_SAMPLES  = 15      # don't recompute until at least 15 frames buffered
+AUTO_RECAL_BUFFER_CAP   = 180     # hard cap on buffered thumbs (~6s at 30fps)
+AUTO_RECAL_THUMB_PX     = 320     # max long-edge dimension of buffered thumbs (memory)
 
 SNAP_PATH           = ROOT / "results" / "live_demo_snap.png"
 
@@ -117,6 +140,10 @@ def main() -> int:
                         help="Frames to capture for background calibration (default 60 ~= 2s)")
     parser.add_argument("--mask-only", action="store_true",
                         help="Show just the heatmap (no original-frame blend)")
+    parser.add_argument("--no-auto-recal", action="store_true",
+                        help="Disable rolling-median background auto-recalibration "
+                             "(use the initial calibration for the whole session). "
+                             "Press 'r' to recalibrate manually instead.")
     args = parser.parse_args()
 
     cap = cv2.VideoCapture(args.camera)
@@ -149,10 +176,22 @@ def main() -> int:
     if ok and background.shape[:2] != probe.shape[:2]:
         background = cv2.resize(background, (probe.shape[1], probe.shape[0]))
 
+    auto_recal = not args.no_auto_recal
     print("Live demo running. Press 'q' to quit, 'r' to recalibrate, 's' to snap.")
+    if auto_recal:
+        print(f"Auto-recalibration: rolling-median background, "
+              f"every {AUTO_RECAL_INTERVAL_S:.0f}s.")
+
     last_log = time.time()
     fps_acc = 0
     fps_disp = 0.0
+
+    # Rolling-median auto-recal state. Buffer + dimensions are lazily sized
+    # on the first frame so they match the real camera resolution.
+    thumb_buffer: deque = deque(maxlen=AUTO_RECAL_BUFFER_CAP)
+    thumb_dims: tuple[int, int] | None = None
+    last_recal_t = time.time()
+    recal_count = 0
 
     while True:
         ok, frame = cap.read()
@@ -161,13 +200,42 @@ def main() -> int:
 
         # === The actual codec saliency pipeline ===
         sal_raw = saliency.predict(frame)
-        if background is not None:
-            motion = motion_helper._motion_mask(frame, background)
-            sal_raw = np.maximum(sal_raw, motion)
+        motion = motion_helper._motion_mask(frame, background)
+        sal_raw = np.maximum(sal_raw, motion)
         sal_s = smoother.smooth(sal_raw)
         alpha = _build_alpha(sal_s, mode="sigmoid",
                              threshold=MASK_THRESHOLD, steepness=MASK_STEEPNESS)
         alpha = np.maximum(alpha, MASK_FLOOR)
+
+        # === Rolling-median auto-recalibration ===
+        # Append a downscaled thumbnail of every incoming frame to a sliding
+        # buffer. Every AUTO_RECAL_INTERVAL_S of wall time, replace the
+        # background with the per-pixel median of that buffer. The median
+        # rejects subjects (they appear in different positions across the
+        # window) while static geometry survives — same trick the codec
+        # uses on a recorded clip, just done online over recent history.
+        if auto_recal:
+            if thumb_dims is None:
+                fh, fw = frame.shape[:2]
+                scale = AUTO_RECAL_THUMB_PX / float(max(fw, fh))
+                tw = max(2, int(fw * scale)) & ~1
+                th = max(2, int(fh * scale)) & ~1
+                thumb_dims = (tw, th)
+            thumb_buffer.append(cv2.resize(frame, thumb_dims))
+
+            if (time.time() - last_recal_t) >= AUTO_RECAL_INTERVAL_S \
+               and len(thumb_buffer) >= AUTO_RECAL_MIN_SAMPLES:
+                median_thumb = np.median(np.stack(thumb_buffer, axis=0),
+                                         axis=0).astype(np.uint8)
+                background = cv2.resize(median_thumb,
+                                        (frame.shape[1], frame.shape[0]))
+                smoother = TemporalSmoother(window=SMOOTH_WINDOW)  # reset
+                last_recal_t = time.time()
+                recal_count += 1
+                # Quiet logging: first few then every 10th to avoid spam
+                if recal_count <= 3 or recal_count % 10 == 0:
+                    print(f"  [auto-recal] background refreshed "
+                          f"(count={recal_count}, window={len(thumb_buffer)} frames)")
 
         # JET overlay (same weights as compare_clip)
         alpha_u8 = (np.clip(alpha, 0, 1) * 255).astype(np.uint8)
@@ -187,6 +255,12 @@ def main() -> int:
                     (12, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (230, 230, 230), 1)
         cv2.putText(display, f"motion={score.motion:.2f}  flow={score.flow_magnitude:.1f}  fps={fps_disp:.1f}",
                     (12, 82), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+        if auto_recal:
+            next_in = max(0.0, AUTO_RECAL_INTERVAL_S - (time.time() - last_recal_t))
+            cv2.putText(display,
+                        f"auto-recal: {recal_count}  next in {next_in:.1f}s  "
+                        f"(buffer={len(thumb_buffer)} thumbs)",
+                        (12, 106), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 220, 255), 1)
         cv2.putText(display, "q quit  /  r recalibrate  /  s snap",
                     (12, display.shape[0] - 12),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
@@ -212,6 +286,8 @@ def main() -> int:
             if background.shape[:2] != frame.shape[:2]:
                 background = cv2.resize(background, (frame.shape[1], frame.shape[0]))
             smoother = TemporalSmoother(window=SMOOTH_WINDOW)   # reset history
+            thumb_buffer.clear()                                 # drop stale thumbs
+            last_recal_t = time.time()                           # restart auto-recal cooldown
         if key == ord("s"):
             SNAP_PATH.parent.mkdir(parents=True, exist_ok=True)
             cv2.imwrite(str(SNAP_PATH), display)
