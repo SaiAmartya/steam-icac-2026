@@ -39,7 +39,13 @@ import cv2
 import numpy as np
 
 from src.saliency import SaliencyEstimator, TemporalSmoother
-from src.bg_fg_codec import compute_background_median, BgFgCodec, BgFgConfig
+from src.bg_fg_codec import (
+    compute_background_median,
+    build_rolling_backgrounds,
+    bg_for_frame,
+    BgFgCodec,
+    BgFgConfig,
+)
 from src.compress import _build_alpha
 
 DATA = ROOT / "data/real"
@@ -123,6 +129,13 @@ def main() -> None:
                         help="Per-panel downscale factor (default 1.0 = source resolution). "
                              "Recommended 0.5 when --internals is on so 1080p source -> 540p "
                              "panels -> a final 2880x1080 grid that plays smoothly on a Pi.")
+    parser.add_argument("--bg-mode", default="static", choices=["static", "rolling"],
+                        help="Background source for the saliency overlay + bottom-row "
+                             "background panel. Match whatever the encoder ran with.")
+    parser.add_argument("--bg-recal-interval", type=float, default=4.0,
+                        help="Rolling-mode recalibration interval in seconds.")
+    parser.add_argument("--bg-window", type=float, default=6.0,
+                        help="Rolling-mode median window in seconds.")
     parser.add_argument("--out", type=Path, default=None,
                         help="Output mp4 path (default: results/comparisons/<clip>_crf<N>.mp4)")
     parser.add_argument("--show", action="store_true",
@@ -150,12 +163,23 @@ def main() -> None:
     need_sal_pipeline = args.internals or (not args.no_saliency)
     sal_est = None
     motion_helper = None
-    background = None
+    bg_source = None     # either an ndarray (static) or a list-of-segments (rolling)
     overlay_smoother = None
     if need_sal_pipeline:
         sal_est = SaliencyEstimator(backend=args.saliency)
-        print(f"  computing static background reference (30-sample temporal median)...")
-        background = compute_background_median(str(orig_path), n_samples=30)
+        if args.bg_mode == "rolling":
+            print(f"  building rolling background schedule "
+                  f"(recal every {args.bg_recal_interval:.1f}s, "
+                  f"±{args.bg_window/2:.1f}s window)...")
+            bg_source = build_rolling_backgrounds(
+                str(orig_path),
+                recalibration_interval_s=args.bg_recal_interval,
+                rolling_window_s=args.bg_window,
+            )
+            print(f"  built {len(bg_source)} rolling backgrounds")
+        else:
+            print(f"  computing static background reference (30-sample temporal median)...")
+            bg_source = compute_background_median(str(orig_path), n_samples=30)
         motion_helper = BgFgCodec(BgFgConfig(saliency_backend=args.saliency))
         overlay_smoother = TemporalSmoother(window=11)
 
@@ -202,20 +226,29 @@ def main() -> None:
     orig_mb = kb(orig_path) / 1024
     # k/base - 1 → negative when ours is smaller → "-81%" instead of "+81%"
     pct = lambda k: f"{(k/base_kb - 1)*100:+.0f}%" if base_kb > 0 else "?"
+    if args.bg_mode == "rolling":
+        bg_title = "rolling background reference"
+        bg_sub = (f"recal every {args.bg_recal_interval:.0f}s "
+                  f"({len(bg_source)} segments, ±{args.bg_window/2:.0f}s window)")
+    else:
+        bg_title = "static background reference"
+        bg_sub = "temporal median of 30 samples (clip-wide)"
     labels = {
         "original":      ("original",                          f"{orig_mb:.1f} MB on disk"),
         "baseline":      (f"baseline H.265 (CRF {args.crf})",  f"{base_mb:.1f} MB"),
         "bgfg":          (f"ours_bgfg (CRF {args.crf})",       f"{bgfg_mb:.1f} MB  ({pct(bgfg_kb)})"),
         "saliency_mask": ("saliency mask",                     f"{args.saliency} + motion fusion"),
-        "background":    ("static background reference",       "temporal median of 30 samples"),
+        "background":    (bg_title,                            bg_sub),
     }
 
-    # Pre-render the background panel once (it's identical every frame —
-    # that's the whole point of the codec).
-    if args.internals:
-        bg_resized = cv2.resize(background, (panel_w, panel_h)) if (panel_w, panel_h) != background.shape[1::-1] else background
-        title, sub = labels["background"]
-        bg_panel_cached = label_frame(bg_resized, title, sub)
+    # Pre-render the background panel ONLY in static mode (one bg for the
+    # whole clip). In rolling mode we re-label per frame so the bottom-right
+    # background panel actually changes when a new segment begins.
+    bg_panel_cached = None
+    if args.internals and isinstance(bg_source, np.ndarray):
+        bg_resized = cv2.resize(bg_source, (panel_w, panel_h)) \
+            if (panel_w, panel_h) != bg_source.shape[1::-1] else bg_source
+        bg_panel_cached = label_frame(bg_resized, *labels["background"])
 
     # --- ffmpeg sink -------------------------------------------------------
     cmd = [
@@ -260,14 +293,26 @@ def main() -> None:
                 break
 
             # Build the codec-internals panels (if requested).
+            # The per-frame background — single static image or current
+            # rolling segment — drives both the saliency overlay's motion
+            # mask AND the bottom-right background panel.
+            current_bg = bg_for_frame(bg_source, frame_idx) if need_sal_pipeline else None
+
             if args.internals:
                 orig = raws["original"]
-                alpha = _saliency_alpha(orig, sal_est, motion_helper, background, overlay_smoother)
+                alpha = _saliency_alpha(orig, sal_est, motion_helper, current_bg, overlay_smoother)
                 raws["saliency_mask"] = saliency_overlay_bgr(orig, alpha)
-                # "background" is rendered from the cached pre-labelled bg panel
+                # Rolling: the bg panel changes per segment, so re-label per frame.
+                # Static: use the cached one.
+                if bg_panel_cached is not None:
+                    raws["__bg_panel_prerendered"] = bg_panel_cached
+                else:
+                    bg_resized = cv2.resize(current_bg, (panel_w, panel_h)) \
+                        if (panel_w, panel_h) != current_bg.shape[1::-1] else current_bg
+                    raws["background"] = bg_resized
             elif not args.no_saliency:
                 orig = raws["original"]
-                alpha = _saliency_alpha(orig, sal_est, motion_helper, background, overlay_smoother)
+                alpha = _saliency_alpha(orig, sal_est, motion_helper, current_bg, overlay_smoother)
                 raws["saliency_mask"] = saliency_overlay_bgr(orig, alpha)
 
             # Compose the top row.
@@ -283,8 +328,8 @@ def main() -> None:
             if bot_order:
                 bot_panels = []
                 for n in bot_order:
-                    if n == "background":
-                        bot_panels.append(bg_panel_cached)
+                    if n == "background" and "__bg_panel_prerendered" in raws:
+                        bot_panels.append(raws["__bg_panel_prerendered"])
                     else:
                         bot_panels.append(panelize(n, raws[n]))
                 bot_row = np.hstack(bot_panels)

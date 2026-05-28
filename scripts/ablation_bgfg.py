@@ -97,7 +97,10 @@ def encode_baseline(input_path: str, out_path: str, crf: int) -> dict:
 
 
 def encode_ours_bgfg(input_path: str, out_path: str, crf: int, saliency_backend: str,
-                     saliency_yolo_kwargs: dict | None) -> dict:
+                     saliency_yolo_kwargs: dict | None,
+                     bg_mode: str = "static",
+                     bg_recal_interval_s: float = 4.0,
+                     bg_window_s: float = 6.0) -> dict:
     cfg = BgFgConfig(
         saliency_backend=saliency_backend,
         saliency_yolo_kwargs=saliency_yolo_kwargs,
@@ -107,9 +110,16 @@ def encode_ours_bgfg(input_path: str, out_path: str, crf: int, saliency_backend:
         mask_steepness=12.0,
         smooth_window=7,
         bg_sample_count=30,
+        bg_mode=bg_mode,
+        bg_recalibration_interval_s=bg_recal_interval_s,
+        bg_rolling_window_s=bg_window_s,
     )
     stats = BgFgCodec(cfg).encode(input_path, out_path)
-    return {"bytes": stats["bytes"], "background_bytes": stats["background_bytes"]}
+    return {
+        "bytes": stats["bytes"],
+        "background_bytes": stats["background_bytes"],
+        "n_bg_segments": stats.get("n_bg_segments", 1),
+    }
 
 
 # ---------- Main runner ----------
@@ -128,6 +138,13 @@ def main():
                         help="Saliency backend for ours_bgfg")
     parser.add_argument("--every", type=int, default=15,
                         help="Sample every N frames for metrics (lower = slower, more accurate)")
+    parser.add_argument("--bg-mode", default="static", choices=["static", "rolling"],
+                        help="bg/fg background mode (default static; rolling recomputes "
+                             "the background every --bg-recal-interval seconds).")
+    parser.add_argument("--bg-recal-interval", type=float, default=4.0,
+                        help="Rolling-mode recalibration interval in seconds (default 4.0).")
+    parser.add_argument("--bg-window", type=float, default=6.0,
+                        help="Rolling-mode median window in seconds (default 6.0).")
     parser.add_argument("--quick", action="store_true",
                         help="3 clips × 1 CRF for smoke test")
     args = parser.parse_args()
@@ -148,8 +165,12 @@ def main():
     n_done = 0
     t0 = time.time()
 
+    bg_mode_desc = (f"rolling (every {args.bg_recal_interval:.1f}s, "
+                    f"±{args.bg_window/2:.1f}s window)"
+                    if args.bg_mode == "rolling" else "static (single clip-wide median)")
     print(f"\n=== ablation_bgfg: {len(clips)} clips × {len(args.crfs)} CRFs ===")
     print(f"    saliency backend = {args.saliency}")
+    print(f"    bg_mode          = {bg_mode_desc}")
     print(f"    output           = {OUT_DIR}\n")
 
     with open(rows_path, "w") as f_rows:
@@ -172,13 +193,22 @@ def main():
 
                 # --- ours_bgfg ---
                 bgfg_path = str(ENCODED_DIR / f"ours_bgfg_crf{crf}_{clip_id}.mp4")
-                enc = encode_ours_bgfg(input_path, bgfg_path, crf, args.saliency, None)
+                enc = encode_ours_bgfg(
+                    input_path, bgfg_path, crf, args.saliency, None,
+                    bg_mode=args.bg_mode,
+                    bg_recal_interval_s=args.bg_recal_interval,
+                    bg_window_s=args.bg_window,
+                )
                 m = sample_metrics(input_path, bgfg_path, sal_for_metrics, every=args.every)
-                row = {"clip": clip_id, "config": "ours_bgfg", "crf": crf, **enc, **m}
+                row = {"clip": clip_id, "config": "ours_bgfg", "crf": crf,
+                       "bg_mode": args.bg_mode, **enc, **m}
                 rows.append(row); f_rows.write(json.dumps(row) + "\n"); f_rows.flush()
                 n_done += 1
+                bg_tag = (f"  bg=rolling×{enc['n_bg_segments']}"
+                          if args.bg_mode == "rolling" else "")
                 print(f"  [{n_done}/{n_total}] {clip_id} crf{crf} bgfg       "
-                      f"{enc['bytes']/1024:7.1f} KB  sal-PSNR {m['sal_psnr_mean']:.2f} dB")
+                      f"{enc['bytes']/1024:7.1f} KB  sal-PSNR {m['sal_psnr_mean']:.2f} dB"
+                      f"  +bg_sidecar {enc['background_bytes']/1024:.1f} KB{bg_tag}")
 
     # Summary aggregations
     summary = aggregate(rows)
