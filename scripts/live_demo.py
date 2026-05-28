@@ -66,7 +66,7 @@ import cv2
 import numpy as np
 
 from src.gate import FootageGate
-from src.saliency import SaliencyEstimator, TemporalSmoother
+from src.saliency import SaliencyEstimator, TemporalSmoother, describe_device
 from src.bg_fg_codec import BgFgCodec, BgFgConfig
 from src.compress import _build_alpha
 
@@ -145,6 +145,12 @@ def main() -> int:
                              "(use the initial calibration for the whole session). "
                              "Press 'r' to recalibrate manually instead.")
     args = parser.parse_args()
+
+    # Loud device banner BEFORE the camera even opens — if YOLO is going to
+    # crawl on CPU the user should know up front, not 30 frames in.
+    dev = describe_device(saliency_backend=args.saliency)
+    print(f"\n=== STEAM IC live demo ===")
+    print(f"  {dev['banner']}")
 
     cap = cv2.VideoCapture(args.camera)
     if not cap.isOpened():

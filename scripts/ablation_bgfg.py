@@ -48,7 +48,7 @@ from skimage.metrics import structural_similarity as sk_ssim
 from src.bg_fg_codec import BgFgCodec, BgFgConfig
 from src.compress import encode_uniform
 from src.metrics import saliency_weighted_psnr
-from src.saliency import SaliencyEstimator
+from src.saliency import SaliencyEstimator, describe_device
 
 OUT_DIR = ROOT / "results" / "ablation_bgfg"
 ENCODED_DIR = OUT_DIR / "encoded"
@@ -168,9 +168,11 @@ def main():
     bg_mode_desc = (f"rolling (every {args.bg_recal_interval:.1f}s, "
                     f"±{args.bg_window/2:.1f}s window)"
                     if args.bg_mode == "rolling" else "static (single clip-wide median)")
+    dev = describe_device(saliency_backend=args.saliency)
     print(f"\n=== ablation_bgfg: {len(clips)} clips × {len(args.crfs)} CRFs ===")
     print(f"    saliency backend = {args.saliency}")
     print(f"    bg_mode          = {bg_mode_desc}")
+    print(f"    {dev['banner']}")
     print(f"    output           = {OUT_DIR}\n")
 
     with open(rows_path, "w") as f_rows:

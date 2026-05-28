@@ -38,7 +38,7 @@ sys.path.insert(0, str(ROOT))
 import cv2
 import numpy as np
 
-from src.saliency import SaliencyEstimator, TemporalSmoother
+from src.saliency import SaliencyEstimator, TemporalSmoother, describe_device
 from src.bg_fg_codec import (
     compute_background_median,
     build_rolling_backgrounds,
@@ -161,6 +161,9 @@ def main() -> None:
 
     # --- Saliency / background setup ---------------------------------------
     need_sal_pipeline = args.internals or (not args.no_saliency)
+    if need_sal_pipeline:
+        dev = describe_device(saliency_backend=args.saliency)
+        print(f"  {dev['banner']}")
     sal_est = None
     motion_helper = None
     bg_source = None     # either an ndarray (static) or a list-of-segments (rolling)

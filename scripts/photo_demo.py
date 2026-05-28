@@ -31,6 +31,7 @@ sys.path.insert(0, str(ROOT))
 from src.bg_fg_codec import BgFgCodec, BgFgConfig  # noqa: E402
 from src.compress import encode_uniform  # noqa: E402
 from src.metrics import video_metrics  # noqa: E402
+from src.saliency import describe_device  # noqa: E402
 
 OUT_DIR = ROOT / "results" / "photo_demo"
 
@@ -177,7 +178,9 @@ def main() -> None:
     tmp_dir = Path(tempfile.mkdtemp(prefix="photo_demo_"))
     src_path = tmp_dir / "capture.mp4"
 
+    dev = describe_device(saliency_backend=args.saliency)
     print("=== STEAM IC webcam → compression demo ===")
+    print(f"  {dev['banner']}")
     capture_burst(args.camera, args.duration, src_path)
 
     base_path = OUT_DIR / "baseline_uniform.mp4"
