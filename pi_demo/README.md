@@ -1,16 +1,29 @@
 # Raspberry Pi showcase demo
 
-Standalone playback bundle for the STEAM IC saliency-aware compression
-pipeline. Designed to run end-to-end in ~25 seconds on a Raspberry Pi 4
-or 5 — useful when you want to demo the headline result without re-running
-the actual encoder on slow hardware.
+Standalone bundle for the STEAM IC saliency-aware compression pipeline.
+It ships two demos:
+
+1. **Compression Pipeline Demo** — a pre-computed playback that runs
+   end-to-end in ~25 seconds on a Raspberry Pi 4 or 5. Shows the headline
+   compression result without re-running the (slow) encoder on the Pi.
+2. **Live Saliency Demo** — opens the camera and runs the *real* saliency
+   pipeline live (same backends, fusion, smoothing and mask shaping the
+   codec uses), overlaying the saliency heatmap on the feed in real time.
 
 ## What's in here
 
-- `gui.py` — graphical front end. Launch this for a button-driven demo
-  experience (recommended for the booth). Requires `python3-tk`.
-- `demo_pi.py` — pure-stdlib console replay of the pipeline. Launch this
-  if you want to run from the terminal, or if tkinter isn't installed.
+- `gui.py` — graphical front end with both demos in tabs (recommended for
+  the booth). Requires `python3-tk`.
+- `demo_pi.py` — pure-stdlib console replay of the compression pipeline.
+  Launch this if you want to run from the terminal, or if tkinter isn't
+  installed.
+- `scripts/live_demo.py` — the live saliency demo (opened by the GUI's
+  "Live Saliency Demo" tab; can also be run directly from the terminal).
+- `src/` — the saliency/codec package the live demo imports.
+- `yolov8n.pt` — YOLOv8n weights, used only by the `yolo` / `yolo+spectral`
+  live-demo backends (kept here so they load offline).
+- `requirements-live.txt` — Python deps for the live demo (the compression
+  playback needs none of these).
 - `clip_virat_crf22.mp4` (~43 MB) — the pre-computed 2-row demo grid:
 
   | layout    | left              | middle              | right        |
@@ -26,11 +39,15 @@ the actual encoder on slow hardware.
 
 ## Setup
 
-Make sure all four files live in the same directory. No Python dependencies
-beyond the standard library are required.
+Keep the folder structure intact — `gui.py`, `demo_pi.py`, the `scripts/`
+and `src/` folders, and `yolov8n.pt` all need to stay where they are
+relative to each other.
 
-A video player is needed for the final "open" step. On Raspberry Pi OS
-Desktop, any of these work and the demo picks the first one available:
+### Compression Pipeline Demo
+
+No Python dependencies beyond the standard library are required. You only
+need a video player for the final "open" step. On Raspberry Pi OS Desktop,
+any of these work and the demo picks the first one available:
 
 - `vlc` (recommended; usually pre-installed on Pi OS Desktop)
 - `mpv`
@@ -44,12 +61,29 @@ Install VLC if it's missing:
 sudo apt install vlc
 ```
 
-If you want to use the `gui.py` front end, also ensure tkinter is present
-(usually preinstalled on Pi OS Desktop):
+If you want the `gui.py` front end, also ensure tkinter is present (usually
+preinstalled on Pi OS Desktop):
 
 ```bash
 sudo apt install python3-tk
 ```
+
+### Live Saliency Demo
+
+This one runs real computer vision, so it needs a few Python packages and
+a working camera. The lightweight tier is enough on a Pi:
+
+```bash
+pip install -r requirements-live.txt
+```
+
+That installs NumPy + opencv-contrib-python, which enables the **spectral**
+and **finegrained** saliency backends (CPU-only, real-time on a Pi —
+recommended). The `yolo` and `yolo+spectral` backends additionally need
+PyTorch + Ultralytics; those lines are commented out in
+`requirements-live.txt` because they're heavy on a Pi and run YOLO on the
+CPU. Uncomment them only if you want semantic (person/vehicle/bag)
+saliency. The `yolov8n.pt` weights ship in this folder so they load offline.
 
 ## Run
 
@@ -59,20 +93,28 @@ sudo apt install python3-tk
 python3 gui.py
 ```
 
-A minimal window opens with a single "Run Compression Pipeline Demo"
-button and a streaming log pane underneath. Click the button. The
-log streams the pipeline stages in real time and the comparison
-video opens in your default player when finished.
+A window opens with two tabs:
 
-**Console-only fallback:**
+- **Live Saliency Demo** — set the camera index, pick a saliency backend,
+  set the number of background-calibration frames, toggle rolling-median
+  auto-recalibration, then click "Launch Live Demo Window". A separate
+  OpenCV window opens: step out of frame during the calibration banner,
+  step back in to see the live saliency heatmap. Keys in that window —
+  `q` quit, `r` recalibrate, `s` snapshot.
+- **Compression Pipeline Demo** — click "Run Compression Pipeline Demo".
+  The log streams the pipeline stages in real time and the comparison
+  video opens in your default player when finished.
+
+**Console-only fallbacks:**
 
 ```bash
-python3 demo_pi.py
+python3 demo_pi.py                  # compression pipeline replay
+python3 scripts/live_demo.py        # live saliency demo (add --saliency spectral on a Pi)
 ```
 
-Same demo, but the log streams to your terminal and the video opens
-when the script finishes. Use this if tkinter isn't installed or you
-prefer a terminal-driven workflow.
+Use these if tkinter isn't installed or you prefer the terminal. Run
+`python3 scripts/live_demo.py --help` to see every flag (camera, saliency
+backend, bg-samples, mask-only, auto-recal).
 
 ## Numbers shown by the demo
 

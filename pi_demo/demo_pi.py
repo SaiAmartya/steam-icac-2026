@@ -38,7 +38,6 @@ from pathlib import Path
 CLIP_ID                  = "clip_virat"
 CRF                      = 22
 SALIENCY_BACKEND         = "yolo+spectral"
-DEVICE                   = "MPS (Apple Silicon)"
 
 SOURCE_RES               = "1920x1080"
 SOURCE_FPS               = 29.97
@@ -143,8 +142,7 @@ def main() -> int:
     header("STEAM IC — saliency-aware compression pipeline")
     line(f"    clip             = {CLIP_ID}")
     line(f"    crf              = {CRF}")
-    line(f"    saliency backend = {SALIENCY_BACKEND}")
-    line(f"    device           = {DEVICE}", pause=0.4)
+    line(f"    saliency backend = {SALIENCY_BACKEND}", pause=0.4)
 
     # ----- Stage source -----
     header("[1/4] Staging source clip")
@@ -169,7 +167,6 @@ def main() -> int:
     # ----- ours_bgfg encode -----
     header("[3/4] Encoding ours_bgfg (saliency-aware bg/fg codec, CRF 22)")
     tick("loading YOLOv8n weights ... ok")
-    tick(f"device           = {DEVICE}")
     tick("sampling 30 frames for background median ...", pause=0.6)
     tick("background built (per-pixel temporal median, blur sigma = 0)", pause=0.4)
     tick("running YOLO + spectral saliency per frame ...", pause=0.3)

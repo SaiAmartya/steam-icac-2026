@@ -1,0 +1,21 @@
+# Dependencies for the LIVE SALIENCY DEMO only.
+# (The hardcoded "Compression Pipeline Demo" needs nothing beyond the Python
+#  standard library + a video player — see README.md.)
+#
+# Two tiers, pick based on which saliency backend you want to run in the GUI:
+#
+# ── Tier 1: lightweight (CPU-only, no neural net) ───────────────────────────
+#   Enables the "spectral" and "finegrained" saliency backends. This is the
+#   recommended path on a Raspberry Pi — installs in seconds, runs in real time.
+numpy>=1.26
+opencv-contrib-python>=4.9        # provides cv2 AND cv2.saliency (spectral/finegrained)
+
+# ── Tier 2: full (adds the YOLO-based backends) ─────────────────────────────
+#   Required ONLY if you want the "yolo" or "yolo+spectral" backends in the
+#   live demo. These pull in PyTorch + Ultralytics, which are large and slow to
+#   install on a Pi and run YOLO on the CPU (expect a low frame rate). Leave
+#   commented out unless you specifically need semantic (person/vehicle/bag)
+#   saliency in the live feed.
+# torch>=2.1
+# torchvision>=0.16
+# ultralytics>=8.1                # YOLOv8n; yolov8n.pt ships next to gui.py

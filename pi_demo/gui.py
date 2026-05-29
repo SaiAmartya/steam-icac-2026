@@ -124,9 +124,9 @@ class DemoConsole:
         self.launcher_mode = launcher_mode
 
         if self.launcher_mode:
-            self.root.title("STEAM IC — Compression Pipeline Demo")
-            self.root.geometry("760x560")
-            self.root.minsize(620, 440)
+            self.root.title("STEAM IC — Pi Demo Console")
+            self.root.geometry("1000x760")
+            self.root.minsize(880, 640)
         else:
             self.root.title("STEAM IC — Demo Console")
             self.root.geometry("1000x760")
@@ -163,7 +163,7 @@ class DemoConsole:
         header = ttk.Frame(self.root)
         header.pack(fill="x", padx=14, pady=(12, 6))
         title_text = (
-            "STEAM IC — Compression Pipeline Demo"
+            "STEAM IC — Pi Demo Console"
             if self.launcher_mode else "STEAM IC — Demo Console"
         )
         ttk.Label(header, text=title_text, style="Title.TLabel").pack(side="left")
@@ -173,15 +173,21 @@ class DemoConsole:
             foreground="#555",
         ).pack(side="left", padx=(8, 0))
 
-        # Middle: launcher panel OR notebook tabs
+        # Middle: notebook tabs in both modes.
+        #   * launcher (Pi / bundled) mode → Live Saliency Demo + the hardcoded
+        #     Compression Pipeline replay (demo_pi.py).
+        #   * full developer mode          → Live Saliency Demo + the full
+        #     Compression Pipeline builder.
+        nb = ttk.Notebook(self.root)
+        nb.pack(fill="both", expand=False, padx=14, pady=4)
+        self.live_tab = ttk.Frame(nb)
+        self.comp_tab = ttk.Frame(nb)
+        nb.add(self.live_tab, text="  Live Saliency Demo  ")
         if self.launcher_mode:
-            self._build_launcher_panel()
+            nb.add(self.comp_tab, text="  Compression Pipeline Demo  ")
+            self._build_live_tab()
+            self._build_launcher_panel(self.comp_tab)
         else:
-            nb = ttk.Notebook(self.root)
-            nb.pack(fill="both", expand=False, padx=14, pady=4)
-            self.live_tab = ttk.Frame(nb)
-            self.comp_tab = ttk.Frame(nb)
-            nb.add(self.live_tab, text="  Live Saliency Demo  ")
             nb.add(self.comp_tab, text="  Compression Pipeline  ")
             self._build_live_tab()
             self._build_comp_tab()
@@ -192,9 +198,9 @@ class DemoConsole:
 
     # ---- Launcher panel (Pi-mode / bundled-mode) ----
 
-    def _build_launcher_panel(self) -> None:
-        frame = ttk.Frame(self.root, padding=20)
-        frame.pack(fill="x", padx=14, pady=4)
+    def _build_launcher_panel(self, parent: tk.Misc | None = None) -> None:
+        frame = ttk.Frame(parent if parent is not None else self.root, padding=20)
+        frame.pack(fill="both", expand=True, padx=14, pady=4)
 
         ttk.Label(
             frame,
